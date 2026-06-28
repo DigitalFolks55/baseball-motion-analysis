@@ -1,0 +1,39 @@
+# .codex/config.toml
+# Project-local Codex configuration.
+# This layer is loaded only when the project is trusted.
+
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+model_verbosity = "medium"
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+# Use cached web search by default.
+# Use "live" only when the task explicitly needs current external information.
+web_search = "cached"
+
+# Keep AGENTS.md compact but allow enough room for project rules.
+project_doc_max_bytes = 65536
+project_doc_fallback_filenames = ["PLANS.md", "README.md"]
+
+# Prefer VS Code-style file links when supported.
+file_opener = "vscode"
+
+[features]
+shell_tool = true
+shell_snapshot = true
+undo = true
+
+[shell_environment_policy]
+# Keep environment forwarding narrow.
+include_only = [
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "PWD",
+  "VIRTUAL_ENV",
+  "PYTHONPATH",
+  "UV_PROJECT_ENVIRONMENT"
+]
