@@ -1,0 +1,42 @@
+# .codex/rules/default.rules
+# Project-local Codex command rules.
+# Keep this conservative.
+
+prefix_rule(
+    pattern = ["uv", "run", "pytest"],
+    decision = "allow",
+    justification = "Running tests is safe and required for QA.",
+    match = [
+        "uv run pytest",
+        "uv run pytest tests/unit",
+    ],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "ruff"],
+    decision = "allow",
+    justification = "Running ruff checks and formatting is safe.",
+    match = [
+        "uv run ruff check .",
+        "uv run ruff format --check .",
+    ],
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "mypy"],
+    decision = "allow",
+    justification = "Running type checks is safe.",
+    match = [
+        "uv run mypy src",
+    ],
+)
+
+prefix_rule(
+    pattern = ["rm", "-rf"],
+    decision = "forbidden",
+    justification = "Dangerous recursive deletion is forbidden. Use targeted file deletion after review.",
+    match = [
+        "rm -rf /",
+        "rm -rf .",
+    ],
+)
