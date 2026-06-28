@@ -9,7 +9,7 @@ authors = [
 ]
 dependencies = [
   "fastapi>=0.115.0",
-  "uvicorn[standard]>=0.30.0",
+  "uvicorn[standard]>=0.49.0",
   "python-multipart>=0.0.9",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
