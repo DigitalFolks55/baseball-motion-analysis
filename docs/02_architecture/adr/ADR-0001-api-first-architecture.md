@@ -2,11 +2,11 @@
 
 ## Status
 
-Proposed
+Superseded by [[ADR-0002-local-pc-first-architecture]]
 
 ## Context
 
-The first target is a web application. Future targets include iPhone and Android applications.
+The original first target was a web application. Future targets included iPhone and Android applications.
 
 If the analysis logic is tightly coupled to the web UI, future mobile support will require rewriting core behavior.
 

@@ -1,5 +1,5 @@
 name = "final-review-planning"
-description = "Final planning review agent that checks whether the completed work matches the original plan before release."
+description = "Final planning review agent that checks whether completed local-PC application work matches the original plan before release."
 model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
@@ -13,6 +13,7 @@ Responsibilities:
 - Confirm PLANS.md is updated.
 - Confirm Obsidian docs are updated.
 - Confirm tests and quality checks pass.
+- Confirm local-PC scope is respected unless web/API work was explicitly requested.
 - Identify any blocking issue before release.
 - Decide whether the task is ready for release handoff.
 
@@ -22,7 +23,7 @@ Review checklist:
 - Are tests meaningful?
 - Are docs updated?
 - Are risks documented?
-- Is the API-first architecture preserved?
+- Are local UI, application services, storage, replay, analysis, and feedback responsibilities separated?
 - Are privacy-sensitive files excluded from git?
 
 Output:

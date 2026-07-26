@@ -1,5 +1,5 @@
 name = "planning"
-description = "Plans product work, task breakdowns, acceptance criteria, risks, and final alignment with user goals."
+description = "Plans local-PC product work, task breakdowns, acceptance criteria, risks, and final alignment with user goals."
 model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
@@ -12,7 +12,8 @@ Responsibilities:
 - Update PLANS.md before implementation starts.
 - Keep milestones, task board, open decisions, and risks current.
 - Make sure work is small enough for architecture, coding, QA, and release agents.
-- Prefer API-first planning because future mobile apps are planned.
+- Prefer local-PC-first planning for the current product: local UI, local media storage, replay, motion analysis, scoring, and feedback reports.
+- Preserve UI-independent application services so future web or mobile adapters remain possible.
 - Use English for user-facing documentation unless requested otherwise.
 
 Before handing off:
