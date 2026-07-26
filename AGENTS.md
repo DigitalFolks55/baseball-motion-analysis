@@ -4,7 +4,7 @@
 
 Repository name: `baseball_motion_analysis`
 
-This project is a baseball motion analysis application. It loads baseball videos and evaluates important motion types such as:
+This project is a baseball motion analysis application. It loads baseball videos or ordered image sequences and evaluates important motion types such as:
 
 * Swing
 * Fielding
@@ -12,7 +12,9 @@ This project is a baseball motion analysis application. It loads baseball videos
 
 The product should identify good points and bad points in the player's motion and generate understandable feedback for players, coaches, and parents.
 
-The first target is a web application. Future targets include iPhone and Android applications, so the architecture must stay API-first and UI-independent.
+The current target is a local-PC application. It should run on the user's computer without a hosted web service for now.
+
+Future targets may include web, iPhone, and Android applications, so the architecture must stay UI-independent and service-oriented. Application services should expose clear interfaces that can later be reused by a web API or mobile adapter, but the immediate implementation should prioritize a local UI, local file storage, local replay, and local analysis workflows.
 
 ## Working Language
 
@@ -25,7 +27,7 @@ The first target is a web application. Future targets include iPhone and Android
 1. Keep domain logic independent from UI.
 2. Keep video loading, pose estimation, motion evaluation, and feedback generation separated.
 3. Prefer small, testable modules.
-4. Do not hard-code baseball coaching rules inside API routes.
+4. Do not hard-code baseball coaching rules inside UI callbacks, API routes, or storage adapters.
 5. Do not commit large videos, model weights, credentials, or generated artifacts.
 6. Use `uv` for dependency and environment management.
 7. Use Obsidian-compatible Markdown for development logs, architecture notes, and feature documentation.
@@ -34,16 +36,18 @@ The first target is a web application. Future targets include iPhone and Android
 
 Use this separation:
 
-* `video`: video loading, validation, frame sampling
+* `ui`: local user interface for upload/import, file library browsing, replay, analysis launch, and report viewing
+* `video`: video loading, validation, metadata extraction, replay preparation, and frame sampling
+* `sequence`: ordered image-sequence validation, metadata extraction, replay preparation, and frame sampling
 * `pose`: keypoint extraction interface and implementations
 * `motion`: swing, fielding, pitching domain logic
 * `analysis`: scoring, rule evaluation, issue detection
 * `feedback`: natural language feedback and report generation
-* `api`: HTTP API endpoints
-* `app`: application entrypoint
-* `storage`: local or remote file persistence
+* `app`: local application entrypoint and application services
+* `storage`: local file persistence, metadata index, and generated report persistence
+* `api`: optional future HTTP adapter only; not the primary target while the app is local-PC-first
 
-The API layer must call application services, not low-level video or pose functions directly.
+The UI and any future API layer must call application services, not low-level video, sequence, pose, motion, analysis, or feedback functions directly.
 
 ## Agent Workflow
 
@@ -82,7 +86,7 @@ Use the following AI agent workflow.
 
 6. `release`
 
-   * Prepare release notes, version bump, changelog, and deployment checklist.
+   * Prepare release notes, version bump, changelog, and local packaging checklist.
    * Confirm GitHub Actions CI and release-check workflows are green before release.
    * Confirm version consistency across `pyproject.toml`, `CHANGELOG.md`, and the GitHub Release tag.
    * Confirm no secrets, user videos, large videos, model files, `.env` files, or generated reports are included.
@@ -125,8 +129,9 @@ uv run ruff format .
 Minimum required tests:
 
 * Unit tests for pure logic
-* Integration tests for API behavior
-* Fixture-based tests for video metadata and frame extraction
+* Integration tests for application-service behavior and future API behavior when API adapters are touched
+* Fixture-based tests for video metadata, image-sequence metadata, replay manifests, and frame extraction
+* Integration tests for local application services and UI adapter behavior where practical
 * No tests should require real user videos or external credentials
 
 Avoid committing heavy binary test data. Use tiny fixtures only.
@@ -140,7 +145,7 @@ Update documentation when:
 * A feature is added or changed
 * Motion evaluation rules change
 * Architecture boundaries change
-* API behavior changes
+* UI, local storage, replay, application-service, or API behavior changes
 * A major decision is made
 
 Use:
@@ -172,19 +177,20 @@ Before adding production dependencies, explain:
 * Why it is needed
 * Alternative options
 * Runtime impact
-* License or deployment concern if relevant
+* License, packaging, or deployment concern if relevant
 
 ## Security and Privacy
 
-Videos may contain personal information. Treat video files as sensitive user data.
+Videos and image sequences may contain personal information. Treat uploaded media as sensitive user data.
 
 Rules:
 
 * Do not log full file paths if they may include personal names.
-* Do not upload videos externally unless explicitly required by the product design.
+* Do not upload videos or images externally unless explicitly required by the product design and approved by the user.
 * Do not commit videos, secrets, tokens, or local environment files.
 * Keep `.env` out of git.
 * Use `.env.example` for documented environment variables.
+* Store uploaded local files under a configurable local data directory that is excluded from git.
 
 ## Release and CI/CD Policy
 
@@ -205,6 +211,7 @@ Current release boundaries:
 * Do not add Docker deployment unless explicitly requested.
 * Do not add production deployment unless explicitly requested.
 * Do not publish to PyPI unless explicitly requested.
+* Do not introduce hosted web-service deployment unless explicitly requested.
 
 ## Definition of Done
 

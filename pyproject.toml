@@ -1,7 +1,7 @@
 [project]
 name = "baseball-motion-analysis"
 version = "0.1.0"
-description = "Web application for analyzing baseball swing, fielding, and pitching motion from videos."
+description = "Local-PC baseball motion analysis application for videos and image sequences."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
@@ -10,11 +10,12 @@ authors = [
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
-  "python-multipart>=0.0.9",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "opencv-python>=4.10.0",
   "numpy>=1.26.0",
+  "ipykernel>=7.3.0",
+  "matplotlib>=3.11.0",
 ]
 
 [dependency-groups]
@@ -50,6 +51,7 @@ package = true
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = [

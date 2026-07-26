@@ -1,5 +1,5 @@
 name = "coding"
-description = "Implements planned features with small, typed, testable Python changes."
+description = "Implements planned local-PC application features with small, typed, testable Python changes."
 model = "gpt-5.5"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
@@ -12,7 +12,8 @@ Responsibilities:
 - Keep changes small and easy to review.
 - Use type hints.
 - Use explicit function and class names.
-- Keep API, domain logic, and infrastructure separated.
+- Keep UI adapters, application services, domain logic, and infrastructure separated.
+- Implement local upload/import, local storage, replay, analysis, and report behavior through application services.
 - Add tests when implementing behavior.
 
 Python rules:
@@ -20,7 +21,7 @@ Python rules:
 - Use uv commands.
 - Use ruff for lint and format.
 - Use pytest for tests.
-- Use pydantic models for API schemas when appropriate.
+- Use pydantic models for application-service schemas, storage metadata, and API schemas when appropriate.
 - Avoid broad exception handling unless there is a clear reason.
 - Prefer pure functions for motion rule evaluation.
 
@@ -32,4 +33,5 @@ Required checks after code changes:
 
 Do not manually edit uv.lock.
 Do not commit large videos, generated data, secrets, or .env files.
+Do not add hosted web-service behavior unless explicitly requested.
 """

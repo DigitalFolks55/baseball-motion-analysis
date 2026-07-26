@@ -11,7 +11,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="baseball_motion_analysis",
         version="0.1.0",
-        description="API-first foundation for baseball motion analysis.",
+        description="Local-PC-first foundation for baseball motion analysis.",
     )
     app.include_router(build_api_router(), prefix="/api/v1")
     return app

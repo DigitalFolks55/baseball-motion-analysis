@@ -1,6 +1,6 @@
 # baseball_motion_analysis
 
-`baseball_motion_analysis` is a web application for analyzing baseball motion from videos.
+`baseball_motion_analysis` is a local-PC application for analyzing baseball motion from videos and ordered image sequences.
 
 Initial target motions:
 
@@ -17,17 +17,22 @@ The application gives feedback about:
 
 ## Architecture
 
-The project uses an API-first architecture so that the analysis backend can support:
+The project uses a local-PC-first, service-oriented architecture. The first product target runs on the user's computer without a hosted web service.
 
-1. Web app
-2. iPhone app
-3. Android app
+The core analysis services should remain independent from the UI so future adapters can support:
+
+1. Local desktop UI
+2. Web app
+3. iPhone app
+4. Android app
 
 Main layers:
 
 ```text
-video -> pose -> motion -> analysis -> feedback -> api
+ui -> app services -> storage -> video/sequence -> pose -> motion -> analysis -> feedback
 ```
+
+The existing HTTP health scaffold is not the primary product target. New product behavior should go through application services that can be called by the local UI and any future API adapter.
 
 ## Setup
 
@@ -35,11 +40,24 @@ video -> pose -> motion -> analysis -> feedback -> api
 uv sync
 ```
 
-## Run API
+## Run API Scaffold
 
 ```bash
 uv run uvicorn baseball_motion_analysis.app.main:app --reload
 ```
+
+The API scaffold currently exposes health behavior only. Local-PC upload, storage, replay, and analysis workflows are planned but not implemented yet.
+
+## Local Media Input Foundation
+
+The local input service supports:
+
+* Recorded local video validation, metadata extraction, and frame sampling.
+* Local image sequence validation and conversion into a common frame sequence.
+* A local camera stream interface for future real-time analysis.
+* Optional local file copy behavior under a configurable media root.
+
+This foundation is service-level only. It does not include a desktop GUI, browser upload endpoint, browser WebSocket streaming, pose estimation, replay UI, motion scoring, or feedback report generation.
 
 ## Run Tests
 
@@ -74,6 +92,7 @@ Important files:
 * `docs/02_architecture/adr/`
 * `docs/03_development_log/`
 * `docs/04_motion_knowledge/`
+* `docs/05_manuals/`
 
 ## Privacy
 
@@ -82,6 +101,7 @@ Videos may contain personal information.
 Do not commit:
 
 * User videos
+* User image sequences
 * Large video fixtures
 * Model weights
 * `.env`

@@ -1,5 +1,5 @@
 name = "quality-assurance"
-description = "Reviews test coverage, edge cases, regressions, linting, typing, and acceptance criteria."
+description = "Reviews local-PC workflow coverage, edge cases, regressions, linting, typing, and acceptance criteria."
 model = "gpt-5.5"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
@@ -12,14 +12,17 @@ Responsibilities:
 - Add or improve tests.
 - Check edge cases and regression risks.
 - Run lint, format, type check, and tests.
-- Ensure video, pose, motion analysis, feedback, and API layers are tested appropriately.
+- Ensure UI adapters, application services, local storage, replay, video, image-sequence, pose, motion analysis, and feedback layers are tested appropriately.
 
 QA focus:
 - Invalid video input
+- Invalid or unordered image-sequence input
+- Local storage path and metadata-index errors
+- Replay manifest consistency for uploaded and stored media
 - Missing or low-confidence pose data
 - Empty or malformed keypoints
 - Motion type mismatch
-- API error responses
+- UI-adapter and application-service error responses
 - Deterministic analysis output
 - Privacy-sensitive logging
 

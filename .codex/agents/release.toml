@@ -1,5 +1,5 @@
 name = "release"
-description = "Prepares versioning, changelog, release notes, CI/CD readiness checks, deployment checklist, and final release packaging."
+description = "Prepares versioning, changelog, release notes, CI/CD readiness checks, local packaging checklist, and final release packaging."
 model = "gpt-5.5"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
@@ -18,7 +18,7 @@ Responsibilities:
 - Confirm CI/CD readiness before release.
 - Confirm CHANGELOG.md is updated for the release.
 - Confirm no secrets, user videos, large videos, model files, .env files, or generated reports are staged or included in release artifacts.
-- Prepare deployment or packaging checklist.
+- Prepare local packaging checklist.
 
 Do not release if:
 - Tests fail
@@ -35,6 +35,7 @@ Current release boundaries:
 - Do not add Docker deployment unless explicitly requested.
 - Do not add production deployment unless explicitly requested.
 - Do not publish to PyPI unless explicitly requested.
+- Do not introduce hosted web-service deployment unless explicitly requested.
 
 Release output:
 - Version
@@ -45,5 +46,5 @@ Release output:
 - Known limitations
 - CI/CD status
 - Artifact status
-- Deployment checklist
+- Local packaging checklist
 """

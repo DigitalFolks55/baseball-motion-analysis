@@ -4,7 +4,9 @@
 
 ## Product Goal
 
-Build a web application that analyzes baseball motion from uploaded videos and gives useful feedback about good and bad points in the player's movement.
+Build a local-PC application that analyzes baseball motion from uploaded videos or ordered image sequences and gives useful feedback about good and bad points in the player's movement.
+
+The current product should run on the user's computer without a hosted web service. Uploaded media, local metadata, and generated reports should stay in the local environment by default.
 
 Initial motion targets:
 
@@ -13,17 +15,18 @@ Initial motion targets:
 3. Throwing
 4. Pitching
 
-Future platform targets:
+Current and future platform targets:
 
-1. Web app
-2. iPhone app
-3. Android app
+1. Local-PC app
+2. Web app
+3. iPhone app
+4. Android app
 
 ## Current Strategy
 
-Use an API-first architecture.
+Use a local-PC-first, service-oriented architecture.
 
-The backend should expose motion analysis APIs that can be reused by future mobile apps. The first UI can be simple, but the analysis core must not depend on the web UI.
+Application services should support local UI workflows for upload/import, local storage, replay, motion analysis, scoring, and feedback report generation. The analysis core must not depend on the UI. Future web or mobile adapters can call the same application services or equivalent service interfaces.
 
 ## Agent Workflow
 
@@ -62,24 +65,79 @@ Acceptance criteria:
 * Basic docs exist
 * Agent workflow is documented
 
-### Milestone 1: Video Upload and Metadata
+### Milestone 1: Local Media Upload, Import, and Metadata
+
+Status: IN_PROGRESS
+
+Goals:
+
+* Upload or import video through a local UI
+* Upload or import ordered image sequences through a local UI
+* Validate file type, readability, ordering, and size
+* Store imported media in the local environment
+* Extract metadata for videos and image sequences
+
+Acceptance criteria:
+
+* Local application service accepts a sample video fixture
+* Local application service accepts a tiny ordered image-sequence fixture
+* Imported files are represented by stable local media IDs
+* Invalid files and unordered sequences return clear errors
+* Unit tests and application-service integration tests exist
+
+DEV001-01 local media input foundation scope:
+
+* Recorded local video file validation, metadata extraction, and frame sampling
+* Multiple local image file validation, sorting, and conversion into a common frame sequence
+* Local camera stream interface contract for future real-time analysis
+* Local filesystem path handling with clear validation errors
+* Optional local media copy behavior using a configurable media root
+* Common `FrameSequence` model shared by video, image-sequence, and camera inputs
+
+DEV001-01 non-goals:
+
+* Full pose estimation
+* Full real-time motion analysis
+* Swing, pitching, batting, throwing, or fielding classification
+* Production video storage
+* Cloud upload/download
+* User account management
+* Full desktop GUI implementation
+* Browser upload endpoints
+* FastAPI upload endpoints
+* Browser WebSocket camera streaming
+* MediaPipe integration
+
+DEV001-01 acceptance criteria:
+
+* A local video file can be validated, opened, and converted into a `FrameSequence`.
+* A local image list can be validated, opened, sorted, and converted into a `FrameSequence`.
+* A local camera stream interface exists and can be tested without real camera hardware.
+* Input logic is separated from pose estimation and motion analysis.
+* Local file paths are handled safely with clear validation errors.
+* Docs explain recorded video, image-sequence, and camera-stream input modes and limitations.
+* Unit tests cover validation, metadata extraction, video sampling, image sequence creation, local copy behavior, and camera interface behavior.
+* No large media files are committed.
+
+### Milestone 2: Local Replay MVP
 
 Status: TODO
 
 Goals:
 
-* Load uploaded video
-* Validate file type and size
-* Extract metadata
-* Sample frames
+* Replay newly uploaded videos in the UI
+* Replay newly uploaded image sequences in the UI
+* Browse and replay previously stored files
+* Provide replay manifests through application services
 
 Acceptance criteria:
 
-* API accepts a sample video
-* Invalid files return clear errors
-* Unit tests and API tests exist
+* UI can replay a stored video
+* UI can replay a stored image sequence in order
+* Replay does not require a hosted web service
+* Tests cover replay manifest creation for videos and image sequences
 
-### Milestone 2: Pose Extraction Interface
+### Milestone 3: Pose Extraction Interface
 
 Status: TODO
 
@@ -93,9 +151,9 @@ Acceptance criteria:
 
 * Pose estimator can be mocked in tests
 * Motion analysis does not depend on a specific pose library directly
-* Sample fixture test exists
+* Sample video or image-sequence fixture test exists
 
-### Milestone 3: Swing Analysis MVP
+### Milestone 4: Swing Analysis MVP
 
 Status: TODO
 
@@ -107,11 +165,11 @@ Goals:
 
 Acceptance criteria:
 
-* API returns swing analysis result
+* Local application service returns swing analysis result
 * Result includes good points, bad points, and confidence notes
 * Documentation explains current evaluation limitations
 
-### Milestone 4: Fielding Analysis MVP
+### Milestone 5: Fielding Analysis MVP
 
 Status: TODO
 
@@ -122,11 +180,11 @@ Goals:
 
 Acceptance criteria:
 
-* API returns fielding analysis result
+* Local application service returns fielding analysis result
 * Feedback is understandable to non-engineers
 * Tests cover core rule logic
 
-### Milestone 5: Pitching / Throwing Analysis MVP
+### Milestone 6: Pitching / Throwing Analysis MVP
 
 Status: TODO
 
@@ -138,33 +196,37 @@ Goals:
 
 Acceptance criteria:
 
-* API returns pitching analysis result
+* Local application service returns pitching analysis result
 * Tests cover core rule logic
 * Limitations are documented
 
-### Milestone 6: Web UI MVP
+### Milestone 7: Local UI MVP
 
 Status: TODO
 
 Goals:
 
-* Upload video from browser
+* Upload or import videos and ordered image sequences
+* Store imported media locally
+* Browse uploaded and stored media
+* Replay videos and image sequences
 * Select motion type
-* Display feedback report
+* Display motion scores and feedback reports
 
 Acceptance criteria:
 
-* User can upload a video
-* User can see analysis result
-* API and UI remain separated
+* User can import a video or image sequence
+* User can replay newly imported and previously stored media
+* User can see analysis result and report
+* UI and application services remain separated
 
-### Milestone 7: Release Preparation
+### Milestone 8: Release Preparation
 
 Status: IN_PROGRESS
 
 Goals:
 
-* Stabilize API
+* Stabilize local application-service behavior
 * Confirm CI/CD readiness
 * Add release checklist
 * Update README and CHANGELOG
@@ -187,7 +249,7 @@ Acceptance criteria:
 | ID     | Task                          | Owner Agent           | Status | Notes               |
 | ------ | ----------------------------- | --------------------- | ------ | ------------------- |
 | T-0001 | Create project scaffold       | planning              | DONE   | Packages, docs, tests, and placeholders created |
-| T-0002 | Define architecture overview  | architecture          | DONE   | API-first overview documented |
+| T-0002 | Define architecture overview  | architecture          | DONE   | Original API-first overview superseded by local-PC-first ADR |
 | T-0003 | Configure uv project          | coding                | DONE   | `uv sync` passes |
 | T-0004 | Configure tests and lint      | quality-assurance     | DONE   | pytest, ruff, format check, and mypy pass |
 | T-0005 | Final review of scaffold      | final-review-planning | DONE   | No blocking issues found |
@@ -199,25 +261,43 @@ Acceptance criteria:
 | T-0011 | Document release CI/CD gates | release | DONE | `AGENTS.md`, `CHANGELOG.md`, and development log updated |
 | T-0012 | Add Docker release/deploy workflow | release | TODO | Future task, not in current scope |
 | T-0013 | Add production deployment workflow | release | TODO | Future task, not in current scope |
+| T-0014 | Reshape project direction to local-PC-first app | planning | DONE | `AGENTS.md`, agent TOMLs, skill, plans, and docs updated |
+| T-0015 | Define local media storage architecture | architecture | TODO | Storage directory, metadata index, privacy boundaries |
+| T-0016 | Define local UI technology choice | architecture | TODO | Must support upload/import, replay, and reports without hosted service |
+| T-0017 | Implement local media import service | coding | TODO | Videos and ordered image sequences |
+| T-0018 | Implement local replay manifests | coding | TODO | Uploaded and stored media |
+| T-0019 | Plan local media input foundation | planning | DONE | DEV001-01 scope, non-goals, acceptance criteria, and risks documented |
+| T-0020 | Design local media input foundation | architecture | DONE | Recorded video, image sequence, camera interface, optional local copy |
+| T-0021 | Implement local media input foundation | coding | DONE | Input-layer only; no pose, analysis, upload endpoint, or WebSocket |
+| T-0022 | QA local media input foundation | quality-assurance | DONE | 21 tests pass; required quality commands pass |
+| T-0023 | Final review local media input foundation | final-review-planning | DONE | Local-PC scope and prompt acceptance criteria verified |
+| T-0024 | Strip notebook outputs without Ruff notebook formatting checks | quality-assurance | DONE | CI and release-check strip notebook outputs; Ruff ignores `notebooks/` formatting |
 
 ## Open Decisions
 
 | ID     | Decision                | Status                    | Owner        | Link                                                        |
 | ------ | ----------------------- | ------------------------- | ------------ | ----------------------------------------------------------- |
-| D-0001 | Web framework           | Proposed: FastAPI backend | architecture | docs/02_architecture/adr/ADR-0001-api-first-architecture.md |
+| D-0001 | Web framework           | Superseded by local-PC-first direction | architecture | docs/02_architecture/adr/ADR-0001-api-first-architecture.md |
 | D-0002 | Pose estimation library | TODO                      | architecture |                                                             |
-| D-0003 | Video storage policy    | TODO                      | architecture |                                                             |
+| D-0003 | Local media storage policy | TODO                   | architecture |                                                             |
 | D-0004 | Feedback scoring format | TODO                      | planning     |                                                             |
+| D-0005 | Local UI framework      | TODO                      | architecture |                                                             |
+| D-0006 | Image-sequence import format | TODO                 | architecture |                                                             |
 
 ## Risk Register
 
 | Risk                                                          | Impact | Mitigation                                                              |
 | ------------------------------------------------------------- | ------ | ----------------------------------------------------------------------- |
 | Video files contain personal data                             | High   | Keep local by default, avoid committing videos, document privacy policy |
+| Image sequences contain personal data                         | High   | Keep local by default, avoid committing images, document privacy policy |
 | Pose estimation quality varies by camera angle                | High   | Return confidence notes and limitations                                 |
 | Motion feedback may be medically or technically overconfident | High   | Use cautious language and show confidence / uncertainty                 |
-| Heavy dependencies may complicate deployment                  | Medium | Add dependencies only after architecture review                         |
-| Mobile support may require API stability                      | Medium | Keep API-first design from start                                        |
+| Heavy dependencies may complicate local packaging              | Medium | Add dependencies only after architecture review                         |
+| Local filesystem permissions vary by OS                       | Medium | Use configurable storage paths and clear errors                         |
+| Future adapters may need API stability                        | Medium | Keep application-service interfaces explicit                            |
+| Local media path leakage exposes personal directories          | High   | Keep normal result metadata to source labels or internal references, not absolute paths |
+| Codec availability varies across local OpenCV installations   | Medium | Validate OpenCV open/read behavior and report clear errors              |
+| Real camera hardware is unavailable in CI                     | Medium | Keep camera tests mocked and interface-only                             |
 
 ## Definition of Done
 

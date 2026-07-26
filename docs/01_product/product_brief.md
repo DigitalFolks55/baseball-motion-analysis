@@ -10,7 +10,9 @@ Baseball players often record videos of their swing, fielding, or pitching motio
 
 ## Goal
 
-Create a web application that analyzes baseball motion from uploaded videos and provides understandable feedback.
+Create a local-PC application that analyzes baseball motion from uploaded videos or ordered image sequences and provides understandable feedback.
+
+The current product should run on the user's computer without a hosted web service. Uploaded media and generated reports should stay in a configurable local data directory unless the user explicitly chooses another workflow in a future version.
 
 ## Target Users
 
@@ -36,6 +38,15 @@ The system should return:
 - Suggested drills or next actions
 - Confidence
 - Limitations
+
+## Required Local-PC Functions
+
+- Upload or import videos through the UI.
+- Upload or import ordered image sequences through the UI.
+- Store uploaded media in the local environment.
+- Browse uploaded and stored media in the UI.
+- Replay uploaded and stored videos or image sequences in the UI.
+- Run pose estimation, swing analysis, fielding analysis, pitching or throwing analysis, motion scoring, and feedback report generation locally.
 
 ## Product Principle
 
