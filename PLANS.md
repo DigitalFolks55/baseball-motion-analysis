@@ -271,6 +271,7 @@ Acceptance criteria:
 | T-0021 | Implement local media input foundation | coding | DONE | Input-layer only; no pose, analysis, upload endpoint, or WebSocket |
 | T-0022 | QA local media input foundation | quality-assurance | DONE | 21 tests pass; required quality commands pass |
 | T-0023 | Final review local media input foundation | final-review-planning | DONE | Local-PC scope and prompt acceptance criteria verified |
+| T-0024 | Strip notebook outputs without Ruff notebook formatting checks | quality-assurance | DONE | CI and release-check strip notebook outputs; Ruff ignores `notebooks/` formatting |
 
 ## Open Decisions
 

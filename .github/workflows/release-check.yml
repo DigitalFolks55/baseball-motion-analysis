@@ -60,10 +60,10 @@ jobs:
         run: uv sync
 
       - name: Run Ruff lint
-        run: uv run ruff check .
+        run: uv run ruff check --exclude notebooks .
 
       - name: Check formatting
-        run: uv run ruff format --check .
+        run: uv run ruff format --check --exclude notebooks .
 
       - name: Run mypy
         run: uv run mypy src
