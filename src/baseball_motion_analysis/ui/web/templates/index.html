@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>baseball_motion_analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+    <script type="module" src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>baseball_motion_analysis</h1>
+        <p>Baseball Motion Video Review</p>
+      </div>
+      <div class="header-meta">
+        <span class="mode-badge">{{ runtime_mode | title }}</span>
+        <span class="privacy-note">{{ privacy_storage_label }}</span>
+      </div>
+    </header>
+
+    {% if runtime_mode == "server" %}
+      <p class="server-warning">{{ server_mode_warning }}</p>
+    {% endif %}
+
+    <main class="layout">
+      <section class="upload-panel" aria-labelledby="upload-title">
+        <div class="section-heading">
+          <h2 id="upload-title">Upload Video</h2>
+          <span>Max {{ max_upload_mb }} MB</span>
+        </div>
+
+        <div id="dropZone" class="drop-zone" tabindex="0">
+          <input id="videoFile" type="file" accept="video/mp4,video/webm,video/quicktime,.mov,.avi,.mkv" />
+          <label for="videoFile">Choose a video or drop it here</label>
+          <p>MP4 and WebM are the most reliable browser replay formats.</p>
+        </div>
+
+        <dl class="file-details">
+          <div>
+            <dt>Selected</dt>
+            <dd id="selectedName">None</dd>
+          </div>
+          <div>
+            <dt>Size</dt>
+            <dd id="selectedSize">-</dd>
+          </div>
+        </dl>
+
+        <div class="actions">
+          <button id="uploadButton" type="button" disabled>Upload</button>
+          <button id="clearButton" type="button" class="secondary">Clear</button>
+        </div>
+
+        <p id="uploadStatus" class="status-line" aria-live="polite">Waiting for a video.</p>
+        <p id="uploadError" class="error-line" aria-live="assertive"></p>
+      </section>
+
+      <section class="library-panel" aria-labelledby="library-title">
+        <div class="section-heading">
+          <h2 id="library-title">Video Library</h2>
+          <button id="refreshButton" type="button" class="secondary">Refresh</button>
+        </div>
+        <div id="libraryStatus" class="status-line" aria-live="polite">Loading library...</div>
+        <div id="videoLibrary" class="video-library"></div>
+      </section>
+
+      <section class="replay-panel" aria-labelledby="replay-title">
+        <div class="section-heading">
+          <h2 id="replay-title">Replay</h2>
+          <label class="speed-control" for="playbackRate">
+            Speed
+            <select id="playbackRate">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+            </select>
+          </label>
+        </div>
+
+        <video id="videoPlayer" controls preload="metadata"></video>
+
+        <div class="replay-actions">
+          <button id="previousFrameButton" type="button" class="secondary" disabled>Previous Frame</button>
+          <button id="nextFrameButton" type="button" class="secondary" disabled>Next Frame</button>
+        </div>
+
+        <dl class="file-details replay-details">
+          <div>
+            <dt>Title</dt>
+            <dd id="replayTitle">No video selected</dd>
+          </div>
+          <div>
+            <dt>Time</dt>
+            <dd id="currentTime">0.00 / 0.00 s</dd>
+          </div>
+          <div>
+            <dt>Resolution</dt>
+            <dd id="resolution">-</dd>
+          </div>
+          <div>
+            <dt>FPS</dt>
+            <dd id="fps">-</dd>
+          </div>
+        </dl>
+
+        <p id="playbackStatus" class="status-line" aria-live="polite">
+          Select a stored video to replay.
+        </p>
+        <p id="playbackError" class="error-line" aria-live="assertive"></p>
+      </section>
+    </main>
+  </body>
+</html>

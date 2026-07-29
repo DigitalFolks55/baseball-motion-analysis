@@ -218,6 +218,11 @@ marimo/_lsp/
 **marimo**/
 
 # Streamlit
+
+# Local baseball_motion_analysis media and metadata
+data/media/
+data/local/
+video/
 .streamlit/secrets.toml
 
 # OS files

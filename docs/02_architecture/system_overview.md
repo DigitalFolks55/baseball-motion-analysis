@@ -2,12 +2,12 @@
 
 ## Architecture Direction
 
-`baseball_motion_analysis` is now local-PC-first. The current product should run on the user's computer without a hosted web service.
+`baseball_motion_analysis` is local-PC-first. The current product should run on the user's computer without requiring a hosted web service, while a browser adapter can be used locally or configured for a server runtime.
 
 The architecture remains UI-independent and service-oriented so future web or mobile adapters can share the same analysis services.
 
 ```text
-local UI -> application services -> storage -> video/sequence -> pose -> motion -> analysis -> feedback
+local UI or browser UI -> application services -> storage -> video/sequence -> pose -> motion -> analysis -> feedback
 ```
 
 The local UI and any future API layer should call application services. They should not call low-level video loading, image-sequence loading, pose estimation, storage, or baseball motion rule code directly.
@@ -23,7 +23,7 @@ The local UI and any future API layer should call application services. They sho
 - `feedback`: user-facing explanation and report generation.
 - `app`: local application entrypoint and application services.
 - `storage`: local media persistence, metadata index, and generated report persistence.
-- `api`: optional future HTTP adapter. It is not the primary target while the product is local-PC-first.
+- `api`: HTTP adapter for health and browser media workflows. API routes call application services rather than low-level video or storage modules.
 - `core`: shared configuration, errors, and cross-cutting primitives only.
 
 ## Required Local Workflows
@@ -58,9 +58,21 @@ Uploaded media should stay in a configurable local data directory. The storage l
 
 For DEV001-01, storage is intentionally limited to optional local copy behavior for selected video and image files. Production media indexing, replay library management, report persistence, and long-term storage policy remain future work.
 
+For DEV002-01, browser-uploaded videos are streamed to controlled staging files, imported through `VideoLibraryApplicationService`, committed under generated internal filenames, and indexed in SQLite. Public browser responses use media IDs and omit absolute paths and stored relative paths.
+
+Uploaded-video deletion also goes through `VideoLibraryApplicationService`. The UI and API provide a media ID only. The application service coordinates committed-file removal through the file store and metadata removal through the repository. SQL and direct file unlinking stay out of API routes and UI callbacks.
+
 ### Replay
 
 Replay should work for both just-uploaded and previously stored media. Application services should provide replay manifests, such as video file references or ordered frame references, without exposing storage internals to motion analysis modules.
+
+For browser video replay, the service returns a manifest:
+
+```text
+media id -> display metadata -> media-ID content URL -> browser playback status
+```
+
+The content endpoint resolves files only through the media ID and supports HTTP byte ranges for normal browser seeking. Direct browser replay is documented as most reliable for MP4 and WebM, and frame stepping is approximate rather than frame-exact.
 
 ### Motion Analysis
 
@@ -79,4 +91,4 @@ media id
 
 ## Current Foundation
 
-The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects, not browser upload endpoints or WebSocket streaming. It does not perform pose estimation, replay UI, storage indexing, or motion analysis.
+The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects. DEV002-01 adds video-only browser upload, SQLite media library indexing, and HTML5 replay. It does not perform pose estimation, image-sequence browser upload, camera streaming, motion analysis, scoring, or feedback generation.

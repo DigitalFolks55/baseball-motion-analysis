@@ -11,12 +11,14 @@
 - [[02_architecture/adr/ADR-0001-api-first-architecture]]
 - [[02_architecture/adr/ADR-0002-local-pc-first-architecture]]
 - [[02_architecture/adr/ADR-0003-local-media-input-foundation]]
+- [[02_architecture/adr/ADR-0004-dual-mode-web-video-ui]]
 
 ## Development Log
 
 - [[03_development_log/YYYY-MM-DD]]
 - [[03_development_log/2026-07-20-local-pc-direction]]
 - [[03_development_log/2026-07-20-local-media-input-foundation]]
+- [[03_development_log/2026-07-29-web-video-upload-replay-ui]]
 
 ## Baseball Motion Knowledge
 
@@ -28,6 +30,7 @@
 ## Manuals
 
 - [[05_manuals/local_media_input_foundation]]
+- [[05_manuals/web_video_upload_replay]]
 
 ## Templates
 
