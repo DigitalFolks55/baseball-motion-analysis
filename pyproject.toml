@@ -71,6 +71,9 @@ ignore = []
 quote-style = "double"
 indent-style = "space"
 
+[tool.ruff.lint.isort]
+known-first-party = ["baseball_motion_analysis"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
