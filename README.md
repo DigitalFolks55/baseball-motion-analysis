@@ -40,13 +40,32 @@ The existing HTTP health scaffold is not the primary product target. New product
 uv sync
 ```
 
-## Run API Scaffold
+## Run Local Browser Mode
 
 ```bash
 uv run uvicorn baseball_motion_analysis.app.main:app --reload
 ```
 
-The API scaffold currently exposes health behavior only. Local-PC upload, storage, replay, and analysis workflows are planned but not implemented yet.
+Open:
+
+```text
+http://127.0.0.1:8000/
+```
+
+The browser UI supports video upload, local media library browsing, HTML5 video replay, and uploaded-video removal. Uploads are streamed to a staging file, validated through the application service, stored under the configured media root, and indexed in SQLite. Deleting a video from the library removes the metadata record and removes the stored media file when it exists.
+
+Default runtime configuration:
+
+```text
+BMA_RUNTIME_MODE=local
+BMA_MEDIA_ROOT=./data/media
+BMA_DATABASE_PATH=./data/media/library.sqlite3
+BMA_MAX_UPLOAD_MB=200
+BMA_HOST=127.0.0.1
+BMA_PORT=8000
+```
+
+For server mode, set `BMA_RUNTIME_MODE=server`, `BMA_HOST`, `BMA_PORT`, `BMA_MEDIA_ROOT`, and `BMA_DATABASE_PATH` before starting the same FastAPI app. Server mode stores files on the configured server-side filesystem. This MVP does not include authentication or multi-user authorization, so do not expose sensitive videos through an unrestricted public deployment.
 
 ## Local Media Input Foundation
 
@@ -57,7 +76,25 @@ The local input service supports:
 * A local camera stream interface for future real-time analysis.
 * Optional local file copy behavior under a configurable media root.
 
-This foundation is service-level only. It does not include a desktop GUI, browser upload endpoint, browser WebSocket streaming, pose estimation, replay UI, motion scoring, or feedback report generation.
+The DEV001 input foundation is service-level only. DEV002 adds the browser video upload and replay adapter described above. Browser WebSocket streaming, pose estimation, motion scoring, and feedback report generation are still not implemented.
+
+## Browser Video Replay Limits
+
+Direct browser replay is most reliable for MP4 and WebM files when the browser supports the contained codec. MOV, AVI, and MKV files may validate successfully through OpenCV but may not replay in every browser. This MVP does not transcode videos and does not add FFmpeg.
+
+Frame stepping in the browser UI is approximate. It seeks by `1 / fps` when FPS is available, but normal HTML5 video playback does not guarantee frame-exact decoding.
+
+## Local Media Cleanup
+
+Uploaded browser videos and metadata are stored under `BMA_MEDIA_ROOT`. With the default settings, remove local test media and metadata by deleting:
+
+```text
+./data/media/
+```
+
+Only remove that directory when you no longer need the uploaded videos or local SQLite media index.
+
+To remove one uploaded video, use the Delete action in the browser media library. That action deletes the stored file by media ID and removes its SQLite metadata record.
 
 ## Run Tests
 

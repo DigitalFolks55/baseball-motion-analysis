@@ -46,6 +46,7 @@ The system should return:
 - Store uploaded media in the local environment.
 - Browse uploaded and stored media in the UI.
 - Replay uploaded and stored videos or image sequences in the UI.
+- Remove uploaded media from the local library when the user no longer wants to keep it.
 - Run pose estimation, swing analysis, fielding analysis, pitching or throwing analysis, motion scoring, and feedback report generation locally.
 
 ## Product Principle

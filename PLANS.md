@@ -121,7 +121,7 @@ DEV001-01 acceptance criteria:
 
 ### Milestone 2: Local Replay MVP
 
-Status: TODO
+Status: IN_PROGRESS
 
 Goals:
 
@@ -136,6 +136,60 @@ Acceptance criteria:
 * UI can replay a stored image sequence in order
 * Replay does not require a hosted web service
 * Tests cover replay manifest creation for videos and image sequences
+
+DEV002-01 dual-mode web video upload and replay UI scope:
+
+* Browser-based video upload page served by the existing FastAPI application
+* Local browser mode where the app runs on the user's computer at `127.0.0.1`
+* Server mode where the same app can run remotely with configurable host, port, media root, database path, and upload limit
+* Server-side streamed multipart video uploads into a controlled staging location
+* Reuse of the existing `MediaInputService`, video validation, OpenCV metadata extraction, and local media copy behavior
+* Stable media IDs, SQLite metadata persistence, and media-ID-based content serving
+* HTML5 video replay manifest, video content endpoint, browser seeking, and playback-speed controls
+* Uploaded-video deletion through application services, including stored file removal and metadata record removal
+
+DEV002-01 non-goals:
+
+* Pose estimation
+* Motion classification
+* Swing, pitching, throwing, or fielding analysis
+* Feedback reports
+* Video annotation overlays
+* Image-sequence upload UI
+* Camera streaming or WebSocket video streaming
+* Automatic transcoding, FFmpeg integration, cloud storage, authentication, authorization, Docker, deployment, or release publishing
+
+DEV002-01 acceptance criteria:
+
+* A user can open `/` in a browser and see a video upload, library, and replay UI.
+* The upload endpoint streams uploaded videos to a staging file without loading the whole file into memory.
+* Upload size is limited by configuration and failed staging files are cleaned up.
+* Existing local media input validation and metadata extraction are reused through application services.
+* Imported videos receive stable media IDs and persisted metadata records.
+* The browser receives media IDs and replay URLs, not absolute filesystem paths.
+* Stored videos are listed and can be replayed through an HTML5 video player.
+* Seeking works through a byte-range-capable content endpoint.
+* Runtime mode, media root, database path, maximum upload size, host, and port are configurable.
+* Browser playback limitations for codecs and non-browser-oriented containers are documented.
+* Users can remove an uploaded video from the UI.
+* Deletion removes the stored media file when it exists and removes the metadata record.
+* Deletion resolves targets only by media ID and does not expose absolute filesystem paths.
+* Tests cover repository, file store, replay manifest, upload validation, staging cleanup, range responses, API responses, and existing health behavior.
+* Tests cover successful deletion, missing-file deletion cleanup, and invalid media ID deletion errors.
+
+DEV002-01 risks:
+
+* Uploaded videos contain personal information and must stay under configured storage.
+* Browser playback codec support varies by browser and operating system.
+* Large uploads can exhaust memory or disk space if limits or streaming behavior regress.
+* Temporary upload files may remain after errors unless cleanup paths are tested.
+* Online server files may be ephemeral depending on the hosting environment.
+* Public online deployment requires authentication and authorization that are outside this task.
+* Concurrent upload behavior may affect a SQLite metadata index.
+* Exact frame-by-frame playback cannot be guaranteed by a normal HTML5 video player.
+* Browser seeking requires correct byte-range response behavior.
+* Accidental deletion would remove local user media, so the UI must require an explicit user action.
+* Deletion must keep metadata and file storage consistent even when a stored file is already missing.
 
 ### Milestone 3: Pose Extraction Interface
 
@@ -202,7 +256,7 @@ Acceptance criteria:
 
 ### Milestone 7: Local UI MVP
 
-Status: TODO
+Status: IN_PROGRESS
 
 Goals:
 
@@ -258,6 +312,8 @@ Acceptance criteria:
 | T-0008 | Add release-check workflow foundation | release | DONE | `.github/workflows/release-check.yml` created |
 | T-0009 | Configure Dependabot updates | release | DONE | GitHub Actions and uv updates configured |
 | T-0010 | Update release-agent CI/CD responsibilities | release | DONE | `.codex/agents/release.toml` updated |
+| T-0025 | Implement dual-mode web video upload and replay UI | final-review-planning | DONE | DEV002-01; supports Milestone 2 and Milestone 7; video-only browser adapter, no motion analysis |
+| T-0026 | Add uploaded-video deletion to web media library | final-review-planning | DONE | DEV002-01 update; delete by media ID through app services; no motion analysis |
 | T-0011 | Document release CI/CD gates | release | DONE | `AGENTS.md`, `CHANGELOG.md`, and development log updated |
 | T-0012 | Add Docker release/deploy workflow | release | TODO | Future task, not in current scope |
 | T-0013 | Add production deployment workflow | release | TODO | Future task, not in current scope |

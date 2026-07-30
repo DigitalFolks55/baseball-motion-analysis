@@ -1,0 +1,1 @@
+"""Browser UI adapter."""
