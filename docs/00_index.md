@@ -19,6 +19,7 @@
 - [[03_development_log/2026-07-20-local-pc-direction]]
 - [[03_development_log/2026-07-20-local-media-input-foundation]]
 - [[03_development_log/2026-07-29-web-video-upload-replay-ui]]
+- [[03_development_log/2026-07-30-community-templates]]
 
 ## Baseball Motion Knowledge
 
