@@ -57,10 +57,10 @@ jobs:
           PY
 
       - name: Sync dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Run Ruff lint
-        run: uv run ruff check --exclude notebooks .
+        run: uv run ruff check --no-cache --exclude notebooks .
 
       - name: Check formatting
         run: uv run ruff format --check --exclude notebooks .
