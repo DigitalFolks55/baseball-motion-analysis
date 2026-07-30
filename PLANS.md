@@ -328,6 +328,7 @@ Acceptance criteria:
 | T-0022 | QA local media input foundation | quality-assurance | DONE | 21 tests pass; required quality commands pass |
 | T-0023 | Final review local media input foundation | final-review-planning | DONE | Local-PC scope and prompt acceptance criteria verified |
 | T-0024 | Strip notebook outputs without Ruff notebook formatting checks | quality-assurance | DONE | CI and release-check strip notebook outputs; Ruff ignores `notebooks/` formatting |
+| T-0027 | Add PR, issue, and security templates | quality-assurance | DONE | GitHub community templates added for review, reporting, and vulnerability handling |
 
 ## Open Decisions
 
