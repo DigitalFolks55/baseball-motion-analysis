@@ -1,4 +1,3 @@
-# ruff: noqa: I001
 from datetime import UTC, datetime
 from pathlib import Path
 
