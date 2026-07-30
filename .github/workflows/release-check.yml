@@ -28,42 +28,14 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Strip Jupyter notebook outputs
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          for notebook_path in Path("notebooks").rglob("*.ipynb"):
-              with notebook_path.open(encoding="utf-8") as notebook_file:
-                  notebook = json.load(notebook_file)
-
-              changed = False
-              for cell in notebook.get("cells", []):
-                  if cell.get("cell_type") != "code":
-                      continue
-                  if cell.get("outputs"):
-                      cell["outputs"] = []
-                      changed = True
-                  if cell.get("execution_count") is not None:
-                      cell["execution_count"] = None
-                      changed = True
-
-              if changed:
-                  notebook_path.write_text(
-                      json.dumps(notebook, ensure_ascii=False, indent=1) + "\n",
-                      encoding="utf-8",
-                  )
-          PY
-
       - name: Sync dependencies
         run: uv sync --locked
 
       - name: Run Ruff lint
-        run: uv run ruff check --no-cache --exclude notebooks .
+        run: uv run ruff check .
 
-      - name: Check formatting
-        run: uv run ruff format --check --exclude notebooks .
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
 
       - name: Run mypy
         run: uv run mypy src
