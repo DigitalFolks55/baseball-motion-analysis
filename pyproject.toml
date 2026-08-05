@@ -9,7 +9,7 @@ authors = [
 ]
 dependencies = [
   "fastapi>=0.115.0",
-  "uvicorn[standard]>=0.30.0",
+  "uvicorn[standard]>=0.52.0",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "opencv-python>=4.10.0",
