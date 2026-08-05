@@ -2,9 +2,12 @@
 
 ## Purpose
 
-The browser UI lets a user upload a local video, browse stored videos, replay a selected video through an HTML5 video player, and remove uploaded videos from the media library.
+The browser UI lets a user upload a local video, browse stored videos, replay a selected video through an HTML5 video player, remove uploaded videos from the media library, and review pose-data-based motion analysis next to replay.
 
-This is a video-only MVP. Pose estimation, motion classification, swing analysis, pitching analysis, fielding analysis, feedback reports, camera streaming, and image-sequence browser upload are not included.
+This is still a video-only upload and replay MVP. Swing analysis can run from a selected
+stored video using local MediaPipe body-pose estimation. Pitching analysis, throwing
+analysis, fielding analysis, camera streaming, and image-sequence browser upload are not
+included. See `docs/05_manuals/swing_motion_analysis_ui.md`.
 
 ## Install Dependencies
 
@@ -111,6 +114,30 @@ Playback speeds:
 
 Previous-frame and next-frame controls are approximate. They seek by `1 / fps` when FPS is available. Normal HTML5 video playback does not guarantee frame-exact decoding.
 
+## Motion Analysis Column
+
+The browser UI is organized with replay as the top visual surface and media/analysis
+tools below:
+
+- Replay on the top row.
+- Upload and video library on the lower left.
+- Motion Analysis on the lower right.
+
+The Motion Analysis column includes swing, throwing, pitching, and fielding as selectable motion types. Swing is the only runnable analysis type in the current implementation. Throwing, pitching, and fielding show planned-state messaging.
+
+Swing analysis uses pose data extracted from the selected stored video. The current
+video-driven workflow samples frames according to the selected quality mode, tracks
+player body landmarks locally with MediaPipe, stabilizes those landmarks, and evaluates
+the resulting `PoseFrame` sequence.
+
+Real video analysis requires `BMA_MEDIAPIPE_POSE_MODEL_PATH` to point to a local
+MediaPipe Pose Landmarker `.task` model. The repository should not contain model files.
+
+The replay panel includes a pose overlay canvas. After analysis completes, the overlay
+draws MediaPipe-derived body keypoints and detected swing event frames inside the visible
+video content rectangle, including letterboxed `object-fit: contain` playback. MediaPipe
+does not detect bat tip, bat barrel, or ball position.
+
 ## Browser Format Limits
 
 MP4 and WebM are the most reliable direct browser replay formats when the contained codec is supported by the browser.
@@ -151,6 +178,10 @@ To remove a single uploaded video, use the Delete action in the browser library 
 - Play and pause the video.
 - Seek forward and backward.
 - Change playback speed.
+- Select Swing in Motion Analysis.
+- Confirm `BMA_MEDIAPIPE_POSE_MODEL_PATH` is configured when testing real pose detection.
+- Run swing analysis and confirm scores and feedback appear in the Motion Analysis column.
+- Confirm MediaPipe body keypoints can appear over the replay area after analysis.
 - Delete the uploaded video and confirm it disappears from the library.
 - Reload the browser and confirm the library remains available.
 - Upload an invalid file and confirm a clear error appears.

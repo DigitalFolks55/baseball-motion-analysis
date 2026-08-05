@@ -260,7 +260,7 @@ When local-PC product behavior changes, update:
 * `docs/01_product/feature_catalog.md`
 * `PLANS.md`
 
-When new implementations, update documents in:
+When new feature implementations have been done, update documents in:
 * `docs/05_manuals/`
 
 ## Done Checklist

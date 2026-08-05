@@ -86,7 +86,8 @@ Current limitations:
 
 ## Motion Analysis and Feedback
 
-Status: Planned.
+Status: Swing evaluation foundation and video-driven local web motion-analysis UI
+implemented with MediaPipe local body-pose estimation.
 
 The analysis workflow should run locally:
 
@@ -95,3 +96,67 @@ stored media -> frame sampling -> pose estimation -> motion analysis -> scoring 
 ```
 
 Supported motion categories are swing, fielding, throwing, and pitching. Reports should include summary, good points, improvement points, suggested drills or next actions, confidence, and limitations.
+
+Current foundation:
+
+- A stable internal pose observation model exists for normalized 2D keypoints and
+  confidence values.
+- Swing analysis accepts frame-level pose observations from callers that already have
+  keypoints.
+- Stored uploaded videos can be analyzed through `/api/v1/analysis/swing/video`; the app
+  samples frames with a selectable quality mode, tracks player body pose locally with
+  MediaPipe, stabilizes pose observations, automatically selects swing event frames from
+  motion cues, and reuses in-memory cached pose results for repeated runs.
+- The default MediaPipe video path requests one pose for ordinary single-player swing
+  clips. Multi-person candidate selection remains configurable through
+  `BMA_MEDIAPIPE_NUM_POSES`.
+- Advanced pose debug controls can run `Single pose`, a raw single-pose MediaPipe
+  diagnostic mode, and can switch the replay overlay between stabilized and raw pose
+  data.
+- Swing phases can be provided by internal/test callers, while the normal automatic path
+  estimates setup, stride, foot strike, impact, and follow-through from wrist/grip
+  velocity, foot movement, and hip/shoulder rotation cues.
+- Swing metrics include shin-torso parallelism, early connection angle, lead knee
+  blocking, head translation, estimated attack angle, and hip-shoulder separation timing.
+- Rule-based swing fault candidates include door swing / casting, forward axis drift,
+  arms-only / one-piece swing, excessive upper swing / early extension, and collapsed
+  lead side.
+- The application-service boundary returns an in-memory analysis result and feedback
+  report with scores, good points, improvement points, drills, confidence, and
+  limitations.
+- The local browser UI includes a video-driven swing analysis panel for the selected
+  stored video and keeps throwing, pitching, and fielding visible as planned categories.
+- The browser UI calls `/api/v1/analysis/swing/video`, which resolves the stored video
+  through application services and calls `SwingVideoAnalysisApplicationService`.
+- Swing analysis results are displayed locally with overall score, phase scores, metrics,
+  detected faults, feedback, confidence, and limitations.
+- The revised browser UI keeps upload and the video library on the left, gives the replay
+  video a wider right-side area, and places motion analysis across the bottom.
+- The replay panel overlays returned pose keypoints and automatic event-frame metadata on
+  top of the video after analysis completes.
+- A `Clear Analysis` button removes current results and overlays without deleting media.
+- Results include compact sampling diagnostics, pose-quality diagnostics, and per-event
+  phase confidence to explain low-quality analysis.
+- Results also include raw-vs-stabilized pose diagnostics, selected candidate indexes
+  when available, MediaPipe running/processing mode, requested pose count, and
+  stabilization-delta summaries.
+- Limitations and pose quality remain available under a foldable diagnostics area at the
+  bottom of motion analysis.
+- Detected-event rows label motion phase-detection confidence as `Event confidence`,
+  while the phase-score table labels scoring-evidence confidence as `Score Confidence`.
+
+Current limitations:
+
+- The default real pose backend requires a local MediaPipe Pose Landmarker `.task` model
+  configured with `BMA_MEDIAPIPE_POSE_MODEL_PATH`.
+- Pose is estimated from sampled frames. Higher accuracy mode samples more frames and can
+  process every original frame for short clips under the configured cap; faster mode can
+  miss fast swing events.
+- `Single pose` mode is diagnostic-only and should not be treated as the final coached
+  evaluation path.
+- MediaPipe detects player body landmarks only. It does not detect bat tip, bat barrel,
+  or ball position.
+- Automatic phase detection is motion-aware but still heuristic and not calibrated from a
+  large real swing dataset.
+- Report persistence is not implemented.
+- Fielding, throwing, and pitching analysis remain planned.
