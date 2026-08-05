@@ -19,8 +19,68 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert page.status_code == 200
     assert "Baseball Motion Video Review" in page.text
     assert "Local" in page.text
+    assert "Upload Video" in page.text
+    assert "Video Library" in page.text
+    assert "Motion Analysis" in page.text
+    assert "Swing Analysis" in page.text
+    assert "Throwing" in page.text
+    assert "Pitching" in page.text
+    assert "Fielding" in page.text
+    assert "Video-driven" in page.text
+    assert "Detected locally from sampled video frames" in page.text
+    assert "selected automatically" in page.text
+    assert "Right-handed" in page.text
+    assert "Quality Mode" in page.text
+    assert "Higher accuracy" in page.text
+    assert "Advanced Pose Debug" in page.text
+    assert "Single pose" in page.text
+    assert "Notebook parity" not in page.text
+    assert '<option value="notebook_parity">Single pose</option>' in page.text
+    assert "Overlay Source" in page.text
+    assert "Score Confidence" in page.text
+    assert "Diagnostics" in page.text
+    assert "Pose Quality" in page.text
+    assert '<details id="analysisDiagnostics"' in page.text
+    assert page.text.index("Diagnostics") > page.text.index("Detected Faults")
+    assert page.text.index("Limitations") > page.text.index("Diagnostics")
+    assert page.text.index("Pose Quality") > page.text.index("Limitations")
+    assert "Run Swing Analysis" in page.text
+    assert "Clear Analysis" in page.text
+    assert "poseOverlayCanvas" in page.text
+    assert "Replay" in page.text
+    assert "Use Default Swing Pose" not in page.text
+    assert "Pose JSON" not in page.text
+    assert "Phase Frame Indexes" not in page.text
     assert script.status_code == 200
+    assert "/api/v1/analysis/swing/video" in script.text
+    assert "quality_mode" in script.text
+    assert "pose_mode" in script.text
+    assert "pose_mode: swingPoseMode.value" in script.text
+    assert "overlay_source" in script.text
+    assert "analysisRawOverlayFrames" in script.text
+    assert "offset ${offsetMs} ms" in script.text
+    assert "Single Pose" in script.text
+    assert "Event confidence" in script.text
+    assert "renderPoseQuality" in script.text
+    assert "videoContentRect" in script.text
+    assert "renderSwingVideoAnalysis" in script.text
+    assert "clearAnalysis({ status" in script.text
+    assert "drawPoseOverlay" in script.text
+    assert 'videoPlayer.addEventListener("timeupdate"' in script.text
+    assert 'motionType.addEventListener("change"' in script.text
+    assert "stepFrame(direction)" in script.text
     assert styles.status_code == 200
+    assert "review-layout" in page.text
+    assert "upload-panel review-column" in page.text
+    assert "library-panel review-column" in page.text
+    assert "replay-panel review-column" in page.text
+    assert "analysis-panel review-column" in page.text
+    assert "grid-template-areas" in styles.text
+    assert '"upload replay"' in styles.text
+    assert '"library replay"' in styles.text
+    assert '"analysis analysis"' in styles.text
+    assert "lower-workspace" not in page.text
+    assert "pose-overlay" in styles.text
 
 
 def test_upload_library_replay_manifest_and_content_range(tmp_path: Path) -> None:

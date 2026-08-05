@@ -23,8 +23,8 @@
       <p class="server-warning">{{ server_mode_warning }}</p>
     {% endif %}
 
-    <main class="layout">
-      <section class="upload-panel" aria-labelledby="upload-title">
+    <main class="layout review-layout">
+      <section class="upload-panel review-column" aria-labelledby="upload-title">
         <div class="section-heading">
           <h2 id="upload-title">Upload Video</h2>
           <span>Max {{ max_upload_mb }} MB</span>
@@ -56,7 +56,7 @@
         <p id="uploadError" class="error-line" aria-live="assertive"></p>
       </section>
 
-      <section class="library-panel" aria-labelledby="library-title">
+      <section class="library-panel review-column" aria-labelledby="library-title">
         <div class="section-heading">
           <h2 id="library-title">Video Library</h2>
           <button id="refreshButton" type="button" class="secondary">Refresh</button>
@@ -65,7 +65,7 @@
         <div id="videoLibrary" class="video-library"></div>
       </section>
 
-      <section class="replay-panel" aria-labelledby="replay-title">
+      <section class="replay-panel review-column" aria-labelledby="replay-title">
         <div class="section-heading">
           <h2 id="replay-title">Replay</h2>
           <label class="speed-control" for="playbackRate">
@@ -80,7 +80,11 @@
           </label>
         </div>
 
-        <video id="videoPlayer" controls preload="metadata"></video>
+        <div class="replay-stage">
+          <video id="videoPlayer" controls preload="metadata"></video>
+          <canvas id="poseOverlayCanvas" class="pose-overlay" aria-hidden="true"></canvas>
+        </div>
+        <p id="poseOverlayStatus" class="overlay-status">Overlay hidden: run swing analysis to detect pose.</p>
 
         <div class="replay-actions">
           <button id="previousFrameButton" type="button" class="secondary" disabled>Previous Frame</button>
@@ -110,6 +114,200 @@
           Select a stored video to replay.
         </p>
         <p id="playbackError" class="error-line" aria-live="assertive"></p>
+      </section>
+
+      <section class="analysis-panel review-column" aria-labelledby="analysis-title">
+        <div class="section-heading">
+          <h2 id="analysis-title">Motion Analysis</h2>
+          <span>Video-driven</span>
+        </div>
+
+        <div class="analysis-controls">
+          <label for="motionType">
+            Motion Type
+            <select id="motionType">
+              <option value="swing" selected>Swing</option>
+              <option value="throwing">Throwing</option>
+              <option value="pitching">Pitching</option>
+              <option value="fielding">Fielding</option>
+            </select>
+            <span class="help-text">Swing is runnable now. Throwing, pitching, and fielding are planned analysis categories.</span>
+          </label>
+
+          <div id="unsupportedMotionNotice" class="planned-motion" hidden>
+            This motion type is planned but not implemented yet. Select Swing to run analysis.
+          </div>
+
+          <div id="swingSetupPanel" class="selected-motion-panel">
+            <div class="motion-subheading">
+              <h3>Swing Analysis</h3>
+              <span id="swingAnalysisSource" class="analysis-source">No video selected</span>
+            </div>
+            <p class="analysis-note">
+              Runs from the selected stored video. The app samples frames, tracks player body pose with MediaPipe, detects swing events, and scores the motion.
+            </p>
+
+            <div class="analysis-input-grid">
+              <label for="swingHandedness">
+                Handedness
+                <select id="swingHandedness">
+                  <option value="right_handed" selected>Right-handed</option>
+                  <option value="left_handed">Left-handed</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+                <span class="help-text">Right-handed uses the left side as lead side; left-handed uses the right side. Unknown lowers confidence because a default side interpretation is used.</span>
+              </label>
+
+              <label for="swingQualityMode">
+                Quality Mode
+                <select id="swingQualityMode">
+                  <option value="higher_accuracy" selected>Higher accuracy</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="faster">Faster</option>
+                </select>
+                <span class="help-text">Higher accuracy samples more frames for fast swings. Faster mode reduces local runtime but can miss foot strike or estimated impact cues.</span>
+              </label>
+            </div>
+
+            <details class="advanced-controls">
+              <summary>Advanced Pose Debug</summary>
+              <div class="analysis-input-grid">
+                <label for="swingPoseMode">
+                  Pose Mode
+                  <select id="swingPoseMode">
+                    <option value="normal" selected>Normal</option>
+                    <option value="notebook_parity">Single pose</option>
+                  </select>
+                  <span class="help-text">Single pose uses raw single-pose MediaPipe landmarks without temporal stabilization.</span>
+                </label>
+                <label for="poseOverlaySource">
+                  Overlay Source
+                  <select id="poseOverlaySource">
+                    <option value="stabilized" selected>Stabilized</option>
+                    <option value="raw">Raw</option>
+                  </select>
+                  <span class="help-text">Raw overlay helps compare detector output with the stabilized analysis pose.</span>
+                </label>
+              </div>
+            </details>
+
+            <dl class="file-details analysis-selection">
+              <div>
+                <dt>Selected Video</dt>
+                <dd id="analysisVideoTitle">No video selected</dd>
+              </div>
+              <div>
+                <dt>Pose</dt>
+                <dd>Detected locally from sampled video frames with MediaPipe body landmarks.</dd>
+              </div>
+              <div>
+                <dt>Events</dt>
+                <dd>Setup, stride, foot strike, impact, and follow-through are selected automatically.</dd>
+              </div>
+            </dl>
+
+            <div class="actions">
+              <button id="runSwingAnalysisButton" type="button" disabled>Run Swing Analysis</button>
+              <button id="clearSwingAnalysisButton" type="button" class="secondary">Clear Analysis</button>
+            </div>
+            <p class="help-text">Run samples the selected video, tracks MediaPipe body pose locally, detects swing events, and returns in-memory results. Clear removes results and overlays without deleting media.</p>
+
+            <p id="swingAnalysisStatus" class="status-line" aria-live="polite">
+              Select a stored video to run swing analysis.
+            </p>
+            <p id="swingAnalysisError" class="error-line" aria-live="assertive"></p>
+          </div>
+        </div>
+
+        <div id="swingAnalysisResults" class="analysis-results" hidden>
+          <div class="score-summary">
+            <div>
+              <span class="score-label">Overall</span>
+              <strong id="swingOverallScore">-</strong>
+            </div>
+            <div>
+              <span class="score-label">Confidence</span>
+              <strong id="swingConfidence">-</strong>
+              <p class="help-text">Confidence reflects visible keypoint quality, handedness certainty, and phase detection certainty.</p>
+            </div>
+          </div>
+
+          <div class="analysis-block" aria-labelledby="swingFeedbackTitle">
+            <h3 id="swingFeedbackTitle">Feedback</h3>
+            <p id="swingSummary"></p>
+            <div class="result-columns">
+              <div>
+                <h4>Good Points</h4>
+                <ul id="swingGoodPoints"></ul>
+              </div>
+              <div>
+                <h4>Improvement Points</h4>
+                <ul id="swingImprovementPoints"></ul>
+              </div>
+              <div>
+                <h4>Drills</h4>
+                <ul id="swingDrills"></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="analysis-block" aria-labelledby="swingPhaseScoresTitle">
+            <h3 id="swingPhaseScoresTitle">Detected Events And Phase Scores</h3>
+            <ul id="swingEvents" class="event-list"></ul>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Phase</th>
+                    <th>Score</th>
+                    <th>Weight</th>
+                    <th>Score Confidence</th>
+                  </tr>
+                </thead>
+                <tbody id="swingPhaseScores"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="analysis-block" aria-labelledby="swingMetricsTitle">
+            <h3 id="swingMetricsTitle">Metrics</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                    <th>Target</th>
+                    <th>Severity</th>
+                    <th>Deduction</th>
+                    <th>Evidence</th>
+                  </tr>
+                </thead>
+                <tbody id="swingMetrics"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="analysis-block" aria-labelledby="swingFaultsTitle">
+            <h3 id="swingFaultsTitle">Detected Faults</h3>
+            <div id="swingFaults"></div>
+          </div>
+
+          <details id="analysisDiagnostics" class="analysis-block diagnostics-panel">
+            <summary>Diagnostics</summary>
+            <div class="diagnostics-content">
+              <div aria-labelledby="swingLimitationsTitle">
+                <h4 id="swingLimitationsTitle">Limitations</h4>
+                <p class="help-text">Limitations identify sampling limits, missing keypoints, weak bat evidence, or 2D camera constraints.</p>
+                <ul id="swingLimitations"></ul>
+              </div>
+              <div aria-labelledby="swingPoseQualityTitle">
+                <h4 id="swingPoseQualityTitle">Pose Quality</h4>
+                <dl id="swingPoseQuality" class="diagnostic-grid"></dl>
+              </div>
+            </div>
+          </details>
+        </div>
       </section>
     </main>
   </body>
