@@ -8,6 +8,9 @@ video and view feedback with pose/event overlays on the replay video.
 The current workflow is local and in-memory. It does not upload media to an external
 service and does not persist analysis reports yet.
 
+Swing results use `swing_evaluation_v2`, the current youth baseball 2D side-view
+baseline methodology.
+
 ## Page Layout
 
 On desktop, the page is organized as:
@@ -32,9 +35,16 @@ On narrow screens the page stacks in this order:
 3. In `Video Library`, select `Replay` for the stored video.
 4. Use replay controls to play, pause, change speed, or step approximately one frame at a
    time when FPS is available.
+5. After swing analysis returns overlay data, use `Poses` to show or hide pose points
+   and skeleton lines, use `Evaluation Lines` to show or hide v2 metric guide lines, and
+   use `Metric` to show all returned evaluation lines or selected metric groups on the
+   replay canvas.
 
 Uploaded videos are stored locally under the configured media root and are served through
 media-ID-based URLs. Browser replay is most reliable with MP4 and WebM.
+
+The `Video Library` list scrolls when many videos are available so upload, replay, and
+analysis controls remain reachable.
 
 ## Select Motion Type
 
@@ -158,9 +168,13 @@ The application service:
 - Automatically selects swing event frames from wrist/grip velocity, foot movement, and
   hip/shoulder rotation cues.
 - Runs the existing swing scoring and feedback service.
-- Returns stabilized and raw pose overlay frames, event metadata, sampling diagnostics,
-  raw/stabilized pose-quality diagnostics, debug diagnostics, scores, feedback,
-  confidence, and limitations.
+- Runs the v2 baseline swing scoring and feedback service.
+- Supplies the stored video width and height to v2 swing scoring so geometric metrics
+  are measured in aspect-aware image coordinates before torso-length normalization.
+- Builds optional evaluation-line primitives from v2 metric evidence and pose frames.
+- Returns methodology metadata, stabilized and raw pose overlay frames, event metadata,
+  evaluation lines, sampling diagnostics, raw/stabilized pose-quality diagnostics, debug
+  diagnostics, scores, feedback, confidence, and limitations.
 
 ## Clear Analysis
 
@@ -172,6 +186,8 @@ not delete the uploaded video or remove it from the video library.
 Results appear in the `Motion Analysis` panel.
 
 - `Overall`: total score out of 100.
+- `Methodology`: the returned swing evaluation methodology, currently
+  `swing_evaluation_v2`.
 - `Confidence`: how reliable the result is based on keypoint quality, handedness
   certainty, and event detection certainty.
 - `Good Points`: visible strengths detected from pose data.
@@ -181,7 +197,8 @@ Results appear in the `Motion Analysis` panel.
   impact, and follow-through event frames plus event confidence, detection method, phase
   scoring, and score confidence. Event confidence comes from motion phase detection;
   score confidence comes from the pose/keypoint evidence used by phase scoring.
-- `Metrics`: measured values, target ranges, severity, deductions, and evidence frames.
+- `Metrics`: v2 measured values, units, target ranges, severity, deductions, and
+  evidence frames.
 - `Detected Faults`: fault candidates, affected phases, severity, evidence, and evidence
   frames.
 - `Diagnostics`: a foldable section at the bottom of motion analysis. It contains:
@@ -205,7 +222,8 @@ The overlay can show:
 
 - Body keypoints.
 - Highlighting for automatically detected event frames.
-- Reduced labels for key points such as head and wrists.
+- Optional evaluation lines for v2 metric evidence such as stance width, torso tilt,
+  head drift, lead blocking, hip/shoulder axes, and grip-path fallback attack angle.
 - Low-confidence point styling.
 - Whether the selected overlay source is raw or stabilized.
 - The offset in milliseconds when replay time maps to the nearest sampled pose frame
@@ -215,16 +233,55 @@ The overlay updates when replay time changes, frame-step buttons are used, analy
 completes, analysis is cleared, or the window is resized. The overlay does not block
 video controls.
 
+The replay toolbar order is `Poses`, `Evaluation Lines`, `Metric`, then `Speed`.
+
+The `Poses` button is on by default after pose overlay data exists and disabled before
+analysis returns pose data. It toggles pose skeleton lines and keypoint circles. Pose
+keypoint text tags such as `Head`, `L Wrist`, and `R Wrist` are disabled by default to
+reduce clutter.
+
+The `Evaluation Lines` button is off by default and disabled until the current swing
+analysis returns evaluation-line data. It toggles service-returned metric guide lines
+with concise labels such as `Stance width`, `Torso tilt`, `Lead block`, `Head drift`, or
+`Grip path`.
+
+The compact `Metric` dropdown is disabled until the current swing analysis returns
+evaluation-line data. It opens a checkbox menu with `All metrics` plus one option for
+each returned metric that has line data, using labels such as `Stance width`,
+`Tilt hold`, `Hip/shoulder timing`, or `Follow-through`. Checking one or more metric
+options filters the visible evaluation lines by the returned `metric_name`. Returning to
+`All metrics` or leaving no specific metric selected shows all returned evaluation lines.
+
+The two overlay buttons are independent. Users can show poses only, evaluation lines
+only, both overlays, or neither. Toggling either button or changing the metric dropdown
+redraws the canvas only; it does not rerun analysis, change replay speed, clear results,
+or delete media. Evaluation-line geometry is returned by the swing analysis service,
+while the browser only filters and renders it.
+
+Metric evidence frame lists and detected-fault evidence text are bounded inside
+scrollable result cells when they become long. The `Metrics` evidence column is compact
+and sized for short frame-number lists. Short evidence values remain compact.
+
 ## Current Limitations
 
 - MediaPipe body-pose analysis requires a configured local `.task` model file.
 - Pose is estimated from sampled frames, not necessarily every original video frame.
 - Overlay drawing accounts for `object-fit: contain` and letterboxing, but browser replay
   time is still matched to exact, nearest sampled, or interpolated pose frames.
+- Evaluation lines are visual aids over returned analysis evidence. MediaPipe still
+  detects body landmarks only, so bat/ball-specific line evidence is unavailable unless
+  future detectors add those keypoints; grip-path fallback lines use lower-confidence
+  styling.
+- Evaluation-line labels identify metric evidence and are separate from pose overlays.
+- Stored-video metric values use the selected video's source dimensions for aspect-aware
+  geometry. Direct pose-JSON workflows without frame dimensions use a compatibility
+  fallback that is less reliable for non-square sources.
 - Single pose mode is diagnostic-only and intentionally skips temporal cleanup.
 - MediaPipe does not detect bat tip, bat barrel, or ball position.
 - Automatic event detection is motion-aware but still heuristic and not calibrated from
   real swing datasets.
+- Some v2 thresholds are provisional and configurable until calibrated with validated
+  swing fixtures.
 - The analysis is 2D side-view rule-based evaluation and may miss 3D movement details.
 - Throwing, pitching, and fielding analysis are planned but not implemented.
 - Reports are not persisted yet.

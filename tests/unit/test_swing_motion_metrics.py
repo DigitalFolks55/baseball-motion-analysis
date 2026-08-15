@@ -15,7 +15,7 @@ from baseball_motion_analysis.motion import (
     resolve_body_sides,
 )
 from baseball_motion_analysis.pose import Point2D
-from unit.swing_test_helpers import GOOD_PHASES, good_swing_frames
+from unit.swing_test_helpers import GOOD_PHASES, aspect_sensitive_swing_frames, good_swing_frames
 
 
 def test_geometry_helpers_calculate_expected_angles() -> None:
@@ -85,10 +85,71 @@ def test_calculate_swing_metrics_for_good_sequence() -> None:
         )
     }
 
-    assert metrics[SwingMetricName.SHIN_TORSO_PARALLELISM].value == pytest.approx(0.0)
-    assert metrics[SwingMetricName.EARLY_CONNECTION_ANGLE].value == pytest.approx(101.31, abs=0.1)
-    assert metrics[SwingMetricName.LEAD_KNEE_BLOCKING_INDEX].value == pytest.approx(0.0)
+    assert metrics[SwingMetricName.NORMALIZED_STANCE_WIDTH].value == pytest.approx(1.2, abs=0.01)
+    assert metrics[SwingMetricName.TORSO_FORWARD_TILT].value == pytest.approx(25.02, abs=0.1)
+    assert metrics[SwingMetricName.TORSO_TILT_PRESERVATION].value == pytest.approx(1.07, abs=0.1)
+    assert metrics[SwingMetricName.GRIP_LOADING_VECTOR].value == pytest.approx(0.0)
+    assert metrics[SwingMetricName.REAR_KNEE_SWAY].value == pytest.approx(0.0)
     assert metrics[SwingMetricName.HEAD_TRANSLATION_RATIO].value == pytest.approx(0.0)
-    assert metrics[SwingMetricName.ESTIMATED_ATTACK_ANGLE].value == pytest.approx(10.0, abs=0.1)
+    assert metrics[SwingMetricName.EARLY_CONNECTION_ANGLE].value == pytest.approx(95.04, abs=0.1)
+    assert metrics[SwingMetricName.LEAD_KNEE_BLOCKING_INDEX].value == pytest.approx(0.0)
     assert metrics[SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING].value == pytest.approx(1.0)
+    assert metrics[SwingMetricName.ESTIMATED_ATTACK_ANGLE].value == pytest.approx(10.0, abs=0.1)
+    assert metrics[SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE].value == pytest.approx(0.0)
     assert all(math.isfinite(metric.value or 0.0) for metric in metrics.values())
+
+
+def test_calculate_swing_metrics_uses_aspect_aware_geometry_for_non_square_frames() -> None:
+    frames = aspect_sensitive_swing_frames()
+
+    aspect_metrics = {
+        metric.name: metric
+        for metric in calculate_swing_metrics(
+            frames,
+            detect_swing_phases(frames, GOOD_PHASES),
+            SwingHandedness.RIGHT_HANDED,
+            frame_width=1920,
+            frame_height=1080,
+        )
+    }
+    raw_fallback_metrics = {
+        metric.name: metric
+        for metric in calculate_swing_metrics(
+            frames,
+            detect_swing_phases(frames, GOOD_PHASES),
+            SwingHandedness.RIGHT_HANDED,
+        )
+    }
+
+    assert aspect_metrics[SwingMetricName.NORMALIZED_STANCE_WIDTH].value == pytest.approx(
+        1.0264,
+        abs=0.001,
+    )
+    assert raw_fallback_metrics[SwingMetricName.NORMALIZED_STANCE_WIDTH].value != pytest.approx(
+        aspect_metrics[SwingMetricName.NORMALIZED_STANCE_WIDTH].value,
+    )
+    assert aspect_metrics[SwingMetricName.TORSO_FORWARD_TILT].value == pytest.approx(30.0)
+    assert raw_fallback_metrics[SwingMetricName.TORSO_FORWARD_TILT].value != pytest.approx(30.0)
+    assert aspect_metrics[SwingMetricName.HEAD_TRANSLATION_RATIO].value == pytest.approx(
+        0.2566,
+        abs=0.001,
+    )
+    assert raw_fallback_metrics[SwingMetricName.HEAD_TRANSLATION_RATIO].value != pytest.approx(
+        aspect_metrics[SwingMetricName.HEAD_TRANSLATION_RATIO].value,
+    )
+    assert aspect_metrics[SwingMetricName.ESTIMATED_ATTACK_ANGLE].value == pytest.approx(10.0)
+    assert raw_fallback_metrics[SwingMetricName.ESTIMATED_ATTACK_ANGLE].value != pytest.approx(
+        10.0,
+    )
+
+
+def test_calculate_swing_metrics_requires_width_and_height_together() -> None:
+    frames = aspect_sensitive_swing_frames()
+
+    with pytest.raises(ValueError, match="frame_width and frame_height"):
+        calculate_swing_metrics(
+            frames,
+            detect_swing_phases(frames, GOOD_PHASES),
+            SwingHandedness.RIGHT_HANDED,
+            frame_width=1920,
+        )

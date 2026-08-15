@@ -13,6 +13,10 @@ const uploadError = document.querySelector("#uploadError");
 const libraryStatus = document.querySelector("#libraryStatus");
 const videoLibrary = document.querySelector("#videoLibrary");
 const videoPlayer = document.querySelector("#videoPlayer");
+const poseOverlayToggle = document.querySelector("#poseOverlayToggle");
+const evaluationLinesToggle = document.querySelector("#evaluationLinesToggle");
+const evaluationMetricToggle = document.querySelector("#evaluationMetricToggle");
+const evaluationMetricMenu = document.querySelector("#evaluationMetricMenu");
 const playbackRate = document.querySelector("#playbackRate");
 const previousFrameButton = document.querySelector("#previousFrameButton");
 const nextFrameButton = document.querySelector("#nextFrameButton");
@@ -56,6 +60,25 @@ let activeManifest = null;
 let analysisOverlayFrames = [];
 let analysisRawOverlayFrames = [];
 let analysisEvents = [];
+let analysisEvaluationOverlay = [];
+let poseOverlayEnabled = false;
+let evaluationLinesEnabled = false;
+
+const allEvaluationMetricsValue = "__all__";
+const selectedEvaluationMetrics = new Set();
+const evaluationMetricLabels = {
+  normalized_stance_width: "Stance width",
+  torso_forward_tilt: "Torso tilt",
+  torso_tilt_preservation: "Tilt hold",
+  grip_loading_vector: "Grip load",
+  rear_knee_sway: "Rear knee sway",
+  head_translation_ratio: "Head drift",
+  early_connection_angle: "Connection",
+  lead_knee_blocking_index: "Lead block",
+  hip_shoulder_separation_timing: "Hip/shoulder timing",
+  estimated_attack_angle: "Attack angle",
+  follow_through_posture_balance: "Follow-through",
+};
 
 const skeletonLines = [
   ["left_shoulder", "right_shoulder"],
@@ -101,6 +124,10 @@ function formatLabel(value) {
   return String(value ?? "-")
     .replaceAll("_", " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatEvaluationMetricLabel(metricName) {
+  return evaluationMetricLabels[metricName] ?? formatLabel(metricName);
 }
 
 function setSelectedFile(file) {
@@ -410,10 +437,18 @@ function clearAnalysis({ status }) {
   analysisOverlayFrames = [];
   analysisRawOverlayFrames = [];
   analysisEvents = [];
+  analysisEvaluationOverlay = [];
+  poseOverlayEnabled = false;
+  evaluationLinesEnabled = false;
+  selectedEvaluationMetrics.clear();
+  updatePoseOverlayToggle();
+  updateEvaluationLinesToggle();
+  updateEvaluationMetricSelect({ preserveSelection: false });
   swingAnalysisResults.hidden = true;
   swingAnalysisError.textContent = "";
   swingOverallScore.textContent = "-";
   swingConfidence.textContent = "-";
+  swingMethodology.textContent = "-";
   swingSummary.textContent = "";
   renderList(swingGoodPoints, []);
   renderList(swingImprovementPoints, []);
@@ -436,8 +471,14 @@ function renderSwingVideoAnalysis(result) {
   analysisOverlayFrames = result.overlay_frames ?? result.overlay ?? [];
   analysisRawOverlayFrames = result.raw_overlay_frames ?? result.raw_overlay ?? [];
   analysisEvents = result.events ?? [];
+  analysisEvaluationOverlay = result.evaluation_overlay ?? result.evaluation_lines ?? [];
+  poseOverlayEnabled = analysisOverlayFrames.length > 0 || analysisRawOverlayFrames.length > 0;
+  updatePoseOverlayToggle();
+  updateEvaluationLinesToggle();
+  updateEvaluationMetricSelect({ preserveSelection: false });
   swingOverallScore.textContent = `${formatNumber(analysis.overall_score, 1)}/100`;
   swingConfidence.textContent = formatNumber(analysis.confidence, 2);
+  swingMethodology.textContent = formatLabel(analysis.methodology_version ?? "swing_evaluation_v2");
   swingSummary.textContent = feedback.summary;
   renderList(swingGoodPoints, feedback.good_points);
   renderList(swingImprovementPoints, feedback.improvement_points);
@@ -545,12 +586,18 @@ function renderMetrics(metrics) {
   swingMetrics.replaceChildren();
   for (const metric of metrics ?? []) {
     const row = document.createElement("tr");
-    appendCell(row, formatLabel(metric.name));
+    appendCell(row, formatLabel(metric.name), "metrics-name-column");
     appendCell(row, metric.value === null ? "-" : formatNumber(metric.value, 2));
+    appendCell(row, formatLabel(metric.unit ?? ""));
     appendCell(row, formatTarget(metric.target_min, metric.target_max));
     appendCell(row, formatLabel(metric.severity));
     appendCell(row, formatNumber(metric.deduction, 2));
-    appendCell(row, (metric.evidence_frames ?? []).join(", "));
+    appendScrollableCell(
+      row,
+      (metric.evidence_frames ?? []).join(", "),
+      "metrics-evidence-column",
+      "metrics-evidence",
+    );
     swingMetrics.append(row);
   }
 }
@@ -567,15 +614,39 @@ function renderFaults(faults) {
   const list = document.createElement("ul");
   for (const fault of faults) {
     const item = document.createElement("li");
-    item.textContent = `${formatLabel(fault.fault_type)} at ${formatLabel(fault.phase)} (${formatLabel(fault.severity)}): ${fault.evidence} Evidence frames: ${(fault.evidence_frames ?? []).join(", ")}.`;
+    item.className = "fault-item";
+    item.append(
+      `${formatLabel(fault.fault_type)} at ${formatLabel(fault.phase)} (${formatLabel(fault.severity)}):`,
+    );
+    const evidence = document.createElement("div");
+    evidence.className = "evidence-cell fault-evidence";
+    evidence.tabIndex = 0;
+    evidence.textContent = `${fault.evidence} Evidence frames: ${(fault.evidence_frames ?? []).join(", ")}.`;
+    item.append(evidence);
     list.append(item);
   }
   swingFaults.append(list);
 }
 
-function appendCell(row, value) {
+function appendCell(row, value, className = "") {
   const cell = document.createElement("td");
-  cell.textContent = value;
+  if (className) cell.className = className;
+  const content = document.createElement("div");
+  content.className = "table-cell-content";
+  content.textContent = value;
+  if (String(value).length > 32) content.tabIndex = 0;
+  cell.append(content);
+  row.append(cell);
+}
+
+function appendScrollableCell(row, value, columnClassName, contentClassName) {
+  const cell = document.createElement("td");
+  cell.className = columnClassName;
+  const content = document.createElement("div");
+  content.className = `table-cell-content evidence-cell ${contentClassName}`;
+  content.tabIndex = 0;
+  content.textContent = value || "-";
+  cell.append(content);
   row.append(cell);
 }
 
@@ -626,14 +697,170 @@ function drawPoseOverlay() {
 
   const keypoints = Object.fromEntries(frame.keypoints.map((keypoint) => [keypoint.name, keypoint]));
   const contentRect = videoContentRect(canvas.width, canvas.height);
-  drawSkeletonLines(context, keypoints, contentRect);
-  for (const keypoint of frame.keypoints) {
-    drawKeypoint(context, keypoint, contentRect, frame.is_event_frame);
+  const hasActiveOverlay = poseOverlayEnabled || evaluationLinesEnabled;
+  if (poseOverlayEnabled) {
+    drawSkeletonLines(context, keypoints, contentRect);
   }
-  if (frame.is_event_frame) {
+  if (evaluationLinesEnabled) {
+    drawEvaluationOverlayLines(context, frame, contentRect);
+  }
+  if (poseOverlayEnabled) {
+    for (const keypoint of frame.keypoints) {
+      drawKeypoint(context, keypoint, contentRect, frame.is_event_frame);
+    }
+  }
+  if (hasActiveOverlay && frame.is_event_frame) {
     drawEventLabel(context, frame, canvas.width);
   }
   poseOverlayStatus.textContent = `${overlayMessage()} Showing ${overlayFrameMatchStatus(frame)} ${frame.source ?? poseOverlaySource.value} pose frame ${frame.frame_index}.`;
+}
+
+function updatePoseOverlayToggle() {
+  const hasPoseFrames = analysisOverlayFrames.length > 0 || analysisRawOverlayFrames.length > 0;
+  poseOverlayToggle.disabled = !hasPoseFrames;
+  poseOverlayToggle.setAttribute("aria-pressed", poseOverlayEnabled ? "true" : "false");
+  poseOverlayToggle.classList.toggle("is-active", poseOverlayEnabled);
+}
+
+function updateEvaluationLinesToggle() {
+  const hasLines = analysisEvaluationOverlay.length > 0;
+  evaluationLinesToggle.disabled = !hasLines;
+  evaluationLinesToggle.setAttribute("aria-pressed", evaluationLinesEnabled ? "true" : "false");
+  evaluationLinesToggle.classList.toggle("is-active", evaluationLinesEnabled);
+}
+
+function updateEvaluationMetricSelect({ preserveSelection = true } = {}) {
+  const metricNames = evaluationMetricNames();
+  const previousSelection = preserveSelection ? new Set(selectedEvaluationMetrics) : new Set();
+  evaluationMetricMenu.replaceChildren();
+  evaluationMetricMenu.append(
+    evaluationMetricMenuItem({
+      value: allEvaluationMetricsValue,
+      label: "All metrics",
+      checked: selectedEvaluationMetrics.size === 0,
+    }),
+  );
+
+  for (const metricName of metricNames) {
+    evaluationMetricMenu.append(
+      evaluationMetricMenuItem({
+        value: metricName,
+        label: formatEvaluationMetricLabel(metricName),
+        checked: previousSelection.has(metricName),
+      }),
+    );
+  }
+
+  selectedEvaluationMetrics.clear();
+  for (const metricName of metricNames) {
+    if (previousSelection.has(metricName)) {
+      selectedEvaluationMetrics.add(metricName);
+    }
+  }
+  syncEvaluationMetricSelectSelection();
+  evaluationMetricToggle.disabled = metricNames.length === 0;
+  if (metricNames.length === 0) closeEvaluationMetricMenu();
+}
+
+function evaluationMetricMenuItem({ value, label, checked }) {
+  const item = document.createElement("label");
+  item.className = "metric-dropdown-item";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.value = value;
+  checkbox.checked = checked;
+  item.append(checkbox, label);
+  return item;
+}
+
+function syncEvaluationMetricSelectSelection() {
+  for (const checkbox of evaluationMetricMenu.querySelectorAll("input[type='checkbox']")) {
+    checkbox.checked =
+      selectedEvaluationMetrics.size === 0
+        ? checkbox.value === allEvaluationMetricsValue
+        : selectedEvaluationMetrics.has(checkbox.value);
+  }
+  evaluationMetricToggle.textContent = selectedEvaluationMetricLabel();
+}
+
+function selectedEvaluationMetricLabel() {
+  if (selectedEvaluationMetrics.size === 0) return "All metrics";
+  if (selectedEvaluationMetrics.size === 1) {
+    const [metricName] = selectedEvaluationMetrics;
+    return formatEvaluationMetricLabel(metricName);
+  }
+  return `${selectedEvaluationMetrics.size} metrics`;
+}
+
+function evaluationMetricNames() {
+  const metricNames = [];
+  const seenMetricNames = new Set();
+  for (const line of analysisEvaluationOverlay) {
+    if (!line.metric_name || seenMetricNames.has(line.metric_name)) continue;
+    seenMetricNames.add(line.metric_name);
+    metricNames.push(line.metric_name);
+  }
+  return metricNames;
+}
+
+poseOverlayToggle.addEventListener("click", () => {
+  if (!currentOverlayFrames().length) return;
+  poseOverlayEnabled = !poseOverlayEnabled;
+  updatePoseOverlayToggle();
+  drawPoseOverlay();
+});
+
+evaluationLinesToggle.addEventListener("click", () => {
+  if (!analysisEvaluationOverlay.length) return;
+  evaluationLinesEnabled = !evaluationLinesEnabled;
+  updateEvaluationLinesToggle();
+  drawPoseOverlay();
+});
+
+evaluationMetricToggle.addEventListener("click", () => {
+  if (evaluationMetricToggle.disabled) return;
+  const shouldOpen = evaluationMetricMenu.hidden;
+  evaluationMetricMenu.hidden = !shouldOpen;
+  evaluationMetricToggle.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+});
+
+evaluationMetricMenu.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement) {
+    syncSelectedEvaluationMetricsFromMenu(event.target);
+    drawPoseOverlay();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  const clickTarget = event.target;
+  if (
+    !evaluationMetricMenu.hidden &&
+    (!(clickTarget instanceof Element) || !clickTarget.closest(".metric-control"))
+  ) {
+    closeEvaluationMetricMenu();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeEvaluationMetricMenu();
+  }
+});
+
+function syncSelectedEvaluationMetricsFromMenu(changedCheckbox) {
+  if (changedCheckbox.value === allEvaluationMetricsValue) {
+    selectedEvaluationMetrics.clear();
+  } else if (changedCheckbox.checked) {
+    selectedEvaluationMetrics.add(changedCheckbox.value);
+  } else {
+    selectedEvaluationMetrics.delete(changedCheckbox.value);
+  }
+  syncEvaluationMetricSelectSelection();
+}
+
+function closeEvaluationMetricMenu() {
+  evaluationMetricMenu.hidden = true;
+  evaluationMetricToggle.setAttribute("aria-expanded", "false");
 }
 
 function overlayFrameMatchStatus(frame) {
@@ -679,20 +906,70 @@ function drawKeypoint(context, keypoint, contentRect, isEventFrame) {
   context.arc(point.x, point.y, radius, 0, Math.PI * 2);
   context.fill();
   context.stroke();
-  if (keypoint.label && isEventFrame) {
-    drawKeypointLabel(context, keypoint.label, point.x, point.y);
+  context.restore();
+}
+
+function drawEvaluationOverlayLines(context, frame, contentRect) {
+  const lines = evaluationLinesForFrame(frame);
+  if (!lines.length) return;
+
+  context.save();
+  for (const line of lines) {
+    const start = overlayPoint(line.start, contentRect);
+    const end = overlayPoint(line.end, contentRect);
+    context.strokeStyle = evaluationLineColor(line);
+    context.lineWidth = line.style === "reference" ? 2 : 3;
+    context.setLineDash(line.style === "dashed" || line.style === "reference" ? [8, 6] : []);
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    drawEvaluationLineLabel(context, line, start, end);
   }
   context.restore();
 }
 
-function drawKeypointLabel(context, label, x, y) {
-  context.font = "600 12px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
-  context.textBaseline = "bottom";
+function evaluationLinesForFrame(frame) {
+  const currentFrameIndex = frame.frame_index;
+  const eventWindow = analysisEvents.find(
+    (event) =>
+      currentFrameIndex >= event.start_frame_index && currentFrameIndex <= event.end_frame_index,
+  );
+  const eventFrameIndex = eventWindow?.frame_index ?? currentFrameIndex;
+  return selectedEvaluationLines().filter(
+    (line) => line.frame_index === currentFrameIndex || line.frame_index === eventFrameIndex,
+  );
+}
+
+function selectedEvaluationLines() {
+  if (selectedEvaluationMetrics.size === 0) return analysisEvaluationOverlay;
+  return analysisEvaluationOverlay.filter(
+    (line) => selectedEvaluationMetrics.has(line.metric_name),
+  );
+}
+
+function evaluationLineColor(line) {
+  const colors = {
+    good: "rgba(30, 150, 92, 0.9)",
+    warning: "rgba(217, 119, 6, 0.92)",
+    severe: "rgba(220, 38, 38, 0.92)",
+    neutral: "rgba(37, 99, 235, 0.88)",
+    low_confidence: "rgba(148, 163, 184, 0.86)",
+  };
+  return colors[line.color_role] ?? colors.neutral;
+}
+
+function drawEvaluationLineLabel(context, line, start, end) {
+  const label = line.label ?? formatLabel(line.metric_name);
+  const x = (start.x + end.x) / 2;
+  const y = (start.y + end.y) / 2;
+  context.font = "700 11px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  context.textBaseline = "middle";
   const textWidth = context.measureText(label).width;
-  const labelX = clamp(x + 7, 2, poseOverlayCanvas.width - textWidth - 8);
-  const labelY = clamp(y - 5, 14, poseOverlayCanvas.height - 2);
-  context.fillStyle = "rgba(15, 23, 32, 0.76)";
-  context.fillRect(labelX - 3, labelY - 14, textWidth + 6, 16);
+  const labelX = clamp(x + 6, 2, poseOverlayCanvas.width - textWidth - 8);
+  const labelY = clamp(y - 8, 14, poseOverlayCanvas.height - 14);
+  context.fillStyle = "rgba(15, 23, 32, 0.72)";
+  context.fillRect(labelX - 3, labelY - 9, textWidth + 6, 18);
   context.fillStyle = "#ffffff";
   context.fillText(label, labelX, labelY);
 }
@@ -751,7 +1028,22 @@ function clamp(value, min, max) {
 function overlayMessage() {
   if (!activeManifest) return "Overlay hidden: select a stored video.";
   if (!currentOverlayFrames().length) return "Overlay hidden: run swing analysis to detect pose.";
-  return "Pose overlay active: sampled key motion points are aligned to replay.";
+  const activeModes = [];
+  if (poseOverlayEnabled) activeModes.push("poses");
+  if (evaluationLinesEnabled) {
+    activeModes.push(evaluationLinesMessage());
+  }
+  if (!activeModes.length) return "Overlay hidden: poses and evaluation lines are off.";
+  return `Overlay active: ${activeModes.join(" + ")} aligned to replay.`;
+}
+
+function evaluationLinesMessage() {
+  if (selectedEvaluationMetrics.size === 0) return "evaluation lines";
+  if (selectedEvaluationMetrics.size === 1) {
+    const [metricName] = selectedEvaluationMetrics;
+    return `${formatEvaluationMetricLabel(metricName)} lines`;
+  }
+  return `${selectedEvaluationMetrics.size} metric groups`;
 }
 
 playbackRate.addEventListener("change", () => {

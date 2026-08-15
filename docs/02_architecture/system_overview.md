@@ -232,6 +232,87 @@ diagnostics area. Event rows label motion phase-detection confidence as `Event
 confidence`; the phase-score table labels scoring-evidence confidence as `Score
 Confidence`.
 
+DEV004-01 replaces the normal swing scoring methodology while preserving the same local
+service and API flow:
+
+```text
+pose observations or stored video
+  -> existing phase alignment and pose-quality handling
+  -> v2 baseline swing metrics
+  -> v2 rule evaluation and phase-weighted scoring
+  -> v2 feedback
+  -> browser-safe response with methodology metadata
+```
+
+The v2 evaluator is based on
+`docs/80_references/Youth Baseball Swing Baseline Research.pdf`. It reports
+`methodology_version: swing_evaluation_v2` and evaluates normalized stance width, torso
+forward tilt, torso tilt preservation, grip loading, rear knee sway, head translation,
+early connection, lead knee blocking, hip-shoulder separation timing, estimated attack
+angle, and follow-through posture/balance. UI and API adapters display returned metric
+names, units, scores, and faults, but v2 thresholds, scoring, and drill mapping stay in
+`motion`, `analysis`, and `feedback`.
+
+DEV004-02 extends the stored-video swing response with optional evaluation-line overlay
+primitives:
+
+```text
+v2 analysis result + pose frames
+  -> app-owned evaluation overlay line construction
+  -> API serialization as browser-safe normalized points
+  -> UI toggle and canvas rendering
+```
+
+Evaluation-line geometry is generated from v2 metric evidence and pose frames in the
+application service. API routes serialize the returned primitives, and browser code only
+stores, toggles, and draws them on the same letterbox-aware replay canvas used for pose
+overlays. MediaPipe still supplies body landmarks only; bat/ball-specific lines remain
+limited to available bat keypoints or lower-confidence grip-path fallback evidence.
+
+DEV004-03 keeps that service/API contract and revises browser presentation. The replay
+toolbar separates pose visibility from evaluation-line visibility with independent
+`Poses` and `Evaluation Lines` toggles before `Speed`. The UI disables pose keypoint text
+tags by default, keeps event labels distinct from evaluation-line labels, and constrains
+the local video library to a scrollable list when many uploaded videos exist. The
+application service continues to own evaluation-line geometry and now verifies all
+required v2 metric line categories when evidence is available.
+
+DEV004-04 corrects swing v2 geometric measurement for non-square sources:
+
+```text
+stored video dimensions + normalized pose observations
+  -> app service passes frame width/height
+  -> motion measurement space converts points for geometry math
+  -> analysis scoring uses aspect-aware metric values
+  -> app/API/UI keep overlay points normalized for browser rendering
+```
+
+The `motion` layer owns the coordinate-space helper and metric calculations. The `app`
+layer supplies media dimensions when stored-video metadata is available. The pose-JSON API
+accepts optional frame dimensions for callers that have them, while missing dimensions
+retain the legacy normalized-coordinate fallback for compatibility.
+
+DEV004-05 UI update 2 keeps the DEV004-02/DEV004-04 service and API contracts unchanged
+and revises only browser presentation. The replay toolbar adds a `Metric` dropdown
+between `Evaluation Lines` and `Speed`. The browser populates that dropdown from
+returned `evaluation_overlay.metric_name` values and filters already-returned normalized
+line primitives before frame/event applicability checks. The `Evaluation Lines` toggle
+remains the master on/off control, `Poses` remains independent, and no swing thresholds,
+deductions, drills, or metric calculations move into the UI.
+
+DEV004-06 UI update 3 keeps the same contract and extends the browser metric filter from
+one selected metric to a selected metric set. Empty/default selection means all metrics,
+while specific selections are matched against returned `metric_name` values before
+frame/event applicability checks. The browser also wraps evidence-heavy metric and fault
+content in bounded scrollable cells; this is layout behavior only and does not affect
+analysis results.
+
+DEV004-07 UI update 4 keeps that selected-set filtering contract unchanged and revises
+only browser presentation. The visible `Metric` control becomes a compact dropdown button
+with checkbox options, so it aligns with the `Speed` control while still supporting
+multiple selected metrics. The browser narrows the metrics evidence column and uses
+bounded table-cell wrappers for unusually large table content.
+
 ## Current Foundation
 
-The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects. DEV002-01 adds video-only browser upload, SQLite media library indexing, and HTML5 replay. DEV003-01 adds swing analysis for already-extracted pose/keypoint sequences, including scoring and feedback generation. DEV003-02 exposes that swing analysis through the local browser UI and `/api/v1/analysis/swing` for already-extracted pose JSON and deterministic demo data. DEV003-03 revises the browser workspace into media, motion-analysis, and replay columns and adds a pose-keypoint overlay drawn from the current pose input. DEV003-04 adds video-driven swing analysis through `/api/v1/analysis/swing/video`, sampled-frame pose estimation through a pose-layer interface, automatic event selection, in-memory pose caching, and overlay data for the replay UI. DEV003-05 adopts MediaPipe Pose Landmarker as the first real local player-body pose backend for stored-video swing analysis. DEV003-06 adds quality-mode sampling, pose stabilization, diagnostics, motion-aware event selection, and improved overlay alignment. DEV003-07 adds notebook-parity pose diagnostics, raw-vs-stabilized overlay output, one-pose default configuration, selected-candidate diagnostics, and replay offset copy. DEV003-08 renames that visible debug mode to `Single pose`, revises the browser layout, folds secondary diagnostics, and clarifies event versus score confidence labels. It does not perform image-sequence browser upload, camera streaming, report persistence, bat/ball detection, production model packaging, release/deployment, or automatic throwing/pitching/fielding analysis.
+The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects. DEV002-01 adds video-only browser upload, SQLite media library indexing, and HTML5 replay. DEV003-01 adds swing analysis for already-extracted pose/keypoint sequences, including scoring and feedback generation. DEV003-02 exposes that swing analysis through the local browser UI and `/api/v1/analysis/swing` for already-extracted pose JSON and deterministic demo data. DEV003-03 revises the browser workspace into media, motion-analysis, and replay columns and adds a pose-keypoint overlay drawn from the current pose input. DEV003-04 adds video-driven swing analysis through `/api/v1/analysis/swing/video`, sampled-frame pose estimation through a pose-layer interface, automatic event selection, in-memory pose caching, and overlay data for the replay UI. DEV003-05 adopts MediaPipe Pose Landmarker as the first real local player-body pose backend for stored-video swing analysis. DEV003-06 adds quality-mode sampling, pose stabilization, diagnostics, motion-aware event selection, and improved overlay alignment. DEV003-07 adds notebook-parity pose diagnostics, raw-vs-stabilized overlay output, one-pose default configuration, selected-candidate diagnostics, and replay offset copy. DEV003-08 renames that visible debug mode to `Single pose`, revises the browser layout, folds secondary diagnostics, and clarifies event versus score confidence labels. DEV004-01 replaces normal swing scoring with the v2 youth baseline methodology and returns methodology metadata and metric units. DEV004-02 adds optional replay evaluation lines returned by the swing video service and toggled in the replay toolbar. DEV004-03 adds independent pose/evaluation-line overlay toggles, disables pose text tags by default, makes the video library scrollable, and verifies all required evaluation-line categories. DEV004-04 passes source dimensions into swing v2 measurement math for non-square video correctness while preserving normalized overlay primitives. DEV004-05 UI update 2 adds a browser-only metric dropdown that filters returned evaluation lines by `metric_name`; DEV004-06 expands it to multi-select and bounds evidence-heavy cells; DEV004-07 makes the metric chooser compact and narrows evidence-table content. It does not perform image-sequence browser upload, camera streaming, report persistence, bat/ball detection, production model packaging, release/deployment, or automatic throwing/pitching/fielding analysis.

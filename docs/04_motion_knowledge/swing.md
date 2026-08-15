@@ -1,10 +1,10 @@
 # Swing Motion Knowledge
 
-Source reference: `docs/80_references/Deep-Research_Swing.pdf`
+Source reference: `docs/80_references/Youth Baseball Swing Baseline Research.pdf`
 
-This document defines the first app-oriented swing evaluation model for youth baseball
-side-view video or image-sequence analysis. The rules are coaching heuristics for
-feedback and scoring, not medical advice or absolute truth. The app should report
+This document defines the current v2 app-oriented swing evaluation model for youth
+baseball side-view video or image-sequence analysis. The rules are coaching heuristics
+for feedback and scoring, not medical advice or absolute truth. The app should report
 uncertainty when camera angle, keypoint confidence, missing bat visibility, or phase
 detection quality is weak.
 
@@ -50,8 +50,12 @@ Frame-level requirements:
 
 * Pose keypoints should include confidence values.
 * Side-view handedness should be normalized into lead side and rear side.
-* Coordinates should be normalized by body scale, commonly torso length or shoulder-hip
-  distance, before spatial thresholds are applied.
+* Coordinates should be measured in a consistent image coordinate space and then
+  normalized by body scale, commonly torso length or shoulder-hip distance, before
+  spatial thresholds are applied.
+* When source frame width and height are known, normalized pose points should be
+  converted to pixel-space or equivalent aspect-aware coordinates before distance,
+  displacement, vector-angle, or joint-angle math is performed.
 * Rules should be skipped or marked low confidence when required keypoints are missing.
 
 ## Swing Phases
@@ -187,25 +191,89 @@ Improvement indicators:
 
 ## Kinematic Metrics
 
-Use 2D vector math and normalized coordinates. The implementation should keep metric
-calculation separate from scoring and feedback text.
+Use 2D vector math in aspect-aware image coordinates, then normalize distances by body
+scale where the metric requires a ratio. Browser overlay primitives may still carry
+normalized points for rendering, but metric math should not mix raw normalized `x` and
+`y` units from non-square frames. The implementation should keep metric calculation
+separate from scoring and feedback text.
 
-### Shin-Torso Parallelism
+### Normalized Stance Width
 
 Keypoints:
 
-* Ankle to knee vector.
-* Hip to shoulder vector.
+* Lead ankle.
+* Rear ankle.
+* Torso length from shoulder and hip midpoints.
 
 Calculation:
 
-* Absolute angle difference between the shin vector and torso vector.
-* Evaluate primarily during setup and stride.
+* Horizontal ankle distance divided by torso length.
+
+Target:
+
+* 1.0 to 1.2 torso lengths during setup.
 
 Interpretation:
 
-* Smaller angle difference suggests the hitter is preserving the forward power posture.
-* Larger angle difference may indicate upright posture, collapsed posture, or poor load.
+* Within range suggests a stable but rotatable base.
+* Too narrow or too wide may reduce balance or rotational ease.
+
+### Torso Forward Tilt And Preservation
+
+Keypoints:
+
+* Both hips.
+* Both shoulders.
+
+Calculation:
+
+* Torso vector angle relative to vertical at setup.
+* Absolute tilt change from setup to impact.
+
+Target:
+
+* Setup torso forward tilt is approximately 25 to 35 degrees.
+* Tilt preservation threshold is configurable until calibrated fixtures exist.
+
+Interpretation:
+
+* Within range suggests a power posture.
+* Large loss of tilt through impact may indicate early extension.
+
+### Grip Loading Vector
+
+Keypoints:
+
+* Wrists or grip proxy.
+* Rear ankle, heel, or foot index when available.
+* Rear shoulder and head proxy.
+
+Calculation:
+
+* Grip height is checked against the ear-to-shoulder band.
+* Horizontal grip position is checked against the rear foot support boundary.
+
+Interpretation:
+
+* Compact rear-side grip loading reduces casting risk.
+* Grip outside the baseline area may indicate an early hand cast.
+
+### Rear Knee Sway
+
+Keypoints:
+
+* Rear knee.
+* Rear ankle or rear foot.
+* Torso length.
+
+Calculation:
+
+* Rear knee movement outside the rear foot boundary divided by torso length.
+
+Interpretation:
+
+* Low sway suggests controlled rear-hip loading.
+* Excessive sway may indicate rushing or poor rear-side load.
 
 ### Early Connection Angle
 
@@ -575,6 +643,21 @@ Video-driven analysis uses the continuous ordered pose sequence as input, but th
 metrics still report evidence around representative event frames or event windows. The
 UI no longer asks users to assign setup, stride, foot strike, impact, or follow-through
 frames manually.
+
+DEV004-01 replaces the normal v1 swing scoring semantics with the v2 youth baseline
+methodology. Normal results now include `methodology_version: swing_evaluation_v2` and
+evaluate normalized stance width, torso forward tilt, torso tilt preservation, grip
+loading vector, rear knee sway, head translation ratio, early connection, lead knee
+blocking, hip-shoulder separation timing, estimated attack angle, and follow-through
+posture/balance.
+
+DEV004-04 corrects the measurement coordinate policy for non-square videos. Stored-video
+analysis now passes source frame width and height into phase detection, v2 metric
+calculation, and secondary fault evidence so distances and angles are calculated in the
+same image coordinate space before torso-length normalization. Direct pose-sequence
+callers may also provide frame dimensions; if they do not, the evaluator keeps the
+legacy normalized-coordinate fallback and should be treated as lower-fidelity geometry
+for non-square sources.
 
 Known limitations:
 

@@ -124,6 +124,8 @@ def _to_app_request(payload: SwingAnalysisRequestPayload) -> AnalyzeSwingRequest
         frames=tuple(_to_pose_frame(frame) for frame in payload.frames),
         handedness=_to_handedness(payload.handedness),
         phase_frames=_to_phase_frames(payload.phase_frames),
+        frame_width=payload.frame_width,
+        frame_height=payload.frame_height,
     )
 
 

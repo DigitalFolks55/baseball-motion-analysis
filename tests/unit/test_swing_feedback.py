@@ -14,8 +14,9 @@ def test_generate_swing_feedback_maps_fault_to_cautious_text_and_drills() -> Non
     report = generate_swing_feedback(analysis)
 
     assert "Based on the visible frames" in report.summary
+    assert "v2 youth baseline" in report.summary
     assert any("may be getting away" in point for point in report.improvement_points)
-    assert "Cross-arm rotation drill" in report.drills_or_suggestions
+    assert "Cross-chest rotation drill" in report.drills_or_suggestions
     assert "Inside-out tee drill" in report.drills_or_suggestions
     assert any(
         fault.fault_type == SwingFaultType.DOOR_SWING_CASTING for fault in analysis.detected_faults

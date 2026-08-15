@@ -19,23 +19,25 @@ def good_swing_frames(
     remove_keypoints = remove_keypoints or set()
     frames: list[PoseFrame] = []
     for frame_index in range(5):
-        left_hip_y = 0.6
-        right_hip_y = 0.6
+        left_hip_y = 0.75
+        right_hip_y = 0.75
         left_shoulder_y = 0.0
         right_shoulder_y = 0.0
-        nose_x = 0.5
-        left_wrist = Point2D(0.5, 0.0)
-        right_wrist = Point2D(0.3, 0.0)
-        left_knee = Point2D(1.0, 1.2)
+        nose_x = 0.35
+        left_wrist = Point2D(0.10, -0.10)
+        right_wrist = Point2D(0.00, -0.10)
+        left_knee = Point2D(1.0, 1.25)
         bat_angle = 10.0
 
         if frame_index >= 1:
-            left_hip_y = 0.45
+            left_hip_y = 0.58
         if frame_index >= 2:
             left_shoulder_y = -0.10
+            left_wrist = Point2D(1.22, -0.15)
+            right_wrist = Point2D(0.95, -0.05)
         if frame_index >= 3:
-            left_wrist = Point2D(1.2, 0.2)
-            right_wrist = Point2D(1.0, 0.2)
+            left_wrist = Point2D(1.2, 0.15)
+            right_wrist = Point2D(1.0, 0.15)
 
         if scenario == "door_swing" and frame_index == 2:
             left_wrist = Point2D(2.0, 2.0)
@@ -52,8 +54,8 @@ def good_swing_frames(
         bat_tip = Point2D(grip.x + 1.0, grip.y - _tan_degrees(bat_angle))
         keypoints = {
             PoseKeypointName.NOSE: _kp(nose_x, -0.35),
-            PoseKeypointName.LEFT_SHOULDER: _kp(1.0, left_shoulder_y),
-            PoseKeypointName.RIGHT_SHOULDER: _kp(0.0, right_shoulder_y),
+            PoseKeypointName.LEFT_SHOULDER: _kp(1.35, left_shoulder_y),
+            PoseKeypointName.RIGHT_SHOULDER: _kp(0.35, right_shoulder_y),
             PoseKeypointName.LEFT_ELBOW: _kp(0.8, 0.25),
             PoseKeypointName.RIGHT_ELBOW: _kp(0.2, 0.25),
             PoseKeypointName.LEFT_WRIST: PoseKeypoint(left_wrist),
@@ -61,13 +63,48 @@ def good_swing_frames(
             PoseKeypointName.LEFT_HIP: _kp(1.0, left_hip_y),
             PoseKeypointName.RIGHT_HIP: _kp(0.0, right_hip_y),
             PoseKeypointName.LEFT_KNEE: PoseKeypoint(left_knee),
-            PoseKeypointName.RIGHT_KNEE: _kp(0.0, 1.2),
-            PoseKeypointName.LEFT_ANKLE: _kp(1.0, 2.0),
+            PoseKeypointName.RIGHT_KNEE: _kp(0.0, 1.25),
+            PoseKeypointName.LEFT_ANKLE: _kp(0.993, 2.0),
             PoseKeypointName.RIGHT_ANKLE: _kp(0.0, 2.0),
+            PoseKeypointName.RIGHT_HEEL: _kp(0.0, 2.0),
+            PoseKeypointName.RIGHT_FOOT_INDEX: _kp(0.18, 2.0),
             PoseKeypointName.BAT_TIP: PoseKeypoint(bat_tip),
         }
         for name in remove_keypoints:
             keypoints.pop(name, None)
+        frames.append(
+            PoseFrame(
+                frame_index=frame_index,
+                timestamp_seconds=frame_index / 30.0,
+                keypoints=keypoints,
+            )
+        )
+    return tuple(frames)
+
+
+def aspect_sensitive_swing_frames() -> tuple[PoseFrame, ...]:
+    """Return MediaPipe-style normalized points that require aspect-aware geometry."""
+    frames: list[PoseFrame] = []
+    shoulder_mid_x = 0.5 + (_tan_degrees(30.0) * 0.3 * 1080.0 / 1920.0)
+    grip = Point2D(0.5, 0.5)
+    bat_tip = Point2D(
+        grip.x + (200.0 / 1920.0),
+        grip.y - (_tan_degrees(10.0) * 200.0 / 1080.0),
+    )
+    for frame_index in range(5):
+        nose_x = 0.5 if frame_index < 3 else 0.55
+        keypoints = {
+            PoseKeypointName.NOSE: _kp(nose_x, 0.3),
+            PoseKeypointName.LEFT_SHOULDER: _kp(shoulder_mid_x + 0.04, 0.4),
+            PoseKeypointName.RIGHT_SHOULDER: _kp(shoulder_mid_x - 0.04, 0.4),
+            PoseKeypointName.LEFT_WRIST: _kp(grip.x + 0.01, grip.y),
+            PoseKeypointName.RIGHT_WRIST: _kp(grip.x - 0.01, grip.y),
+            PoseKeypointName.LEFT_HIP: _kp(0.54, 0.7),
+            PoseKeypointName.RIGHT_HIP: _kp(0.46, 0.7),
+            PoseKeypointName.LEFT_ANKLE: _kp(0.6, 0.9),
+            PoseKeypointName.RIGHT_ANKLE: _kp(0.4, 0.9),
+            PoseKeypointName.BAT_TIP: PoseKeypoint(bat_tip),
+        }
         frames.append(
             PoseFrame(
                 frame_index=frame_index,

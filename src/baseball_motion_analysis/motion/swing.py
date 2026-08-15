@@ -6,7 +6,6 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from statistics import mean
 
 from baseball_motion_analysis.pose import Point2D, PoseFrame, PoseKeypoint, PoseKeypointName
 
@@ -37,14 +36,19 @@ class SwingPhase(StrEnum):
 
 
 class SwingMetricName(StrEnum):
-    """Kinematic metrics for swing evaluation v1."""
+    """Kinematic metrics for baseline-driven swing evaluation v2."""
 
-    SHIN_TORSO_PARALLELISM = "shin_torso_parallelism"
+    NORMALIZED_STANCE_WIDTH = "normalized_stance_width"
+    TORSO_FORWARD_TILT = "torso_forward_tilt"
+    TORSO_TILT_PRESERVATION = "torso_tilt_preservation"
+    GRIP_LOADING_VECTOR = "grip_loading_vector"
+    REAR_KNEE_SWAY = "rear_knee_sway"
+    HEAD_TRANSLATION_RATIO = "head_translation_ratio"
     EARLY_CONNECTION_ANGLE = "early_connection_angle"
     LEAD_KNEE_BLOCKING_INDEX = "lead_knee_blocking_index"
-    HEAD_TRANSLATION_RATIO = "head_translation_ratio"
-    ESTIMATED_ATTACK_ANGLE = "estimated_attack_angle"
     HIP_SHOULDER_SEPARATION_TIMING = "hip_shoulder_separation_timing"
+    ESTIMATED_ATTACK_ANGLE = "estimated_attack_angle"
+    FOLLOW_THROUGH_POSTURE_BALANCE = "follow_through_posture_balance"
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,89 @@ class SwingMetricValue:
 
 
 @dataclass(frozen=True)
+class SwingMeasurementSpace:
+    """Coordinate space used for geometry calculations."""
+
+    frame_width: int | None = None
+    frame_height: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.frame_width is None) != (self.frame_height is None):
+            msg = "frame_width and frame_height must be provided together"
+            raise ValueError(msg)
+        if self.frame_width is not None and self.frame_width <= 0:
+            msg = "frame_width must be greater than 0"
+            raise ValueError(msg)
+        if self.frame_height is not None and self.frame_height <= 0:
+            msg = "frame_height must be greater than 0"
+            raise ValueError(msg)
+
+    @classmethod
+    def from_dimensions(
+        cls,
+        *,
+        frame_width: int | None,
+        frame_height: int | None,
+    ) -> SwingMeasurementSpace:
+        """Create a measurement space from optional frame dimensions."""
+        if frame_width is None and frame_height is None:
+            return cls()
+        return cls(frame_width=frame_width, frame_height=frame_height)
+
+    @property
+    def has_frame_dimensions(self) -> bool:
+        """Return whether video dimensions are available for aspect-aware math."""
+        return self.frame_width is not None and self.frame_height is not None
+
+    def point(self, point: Point2D) -> Point2D:
+        """Return a point in the measurement coordinate space."""
+        if self.frame_width is None or self.frame_height is None:
+            return point
+        return Point2D(x=point.x * self.frame_width, y=point.y * self.frame_height)
+
+    def distance(self, start: Point2D, end: Point2D) -> float:
+        """Return Euclidean distance in the measurement coordinate space."""
+        measured_start = self.point(start)
+        measured_end = self.point(end)
+        return math.dist((measured_start.x, measured_start.y), (measured_end.x, measured_end.y))
+
+    def horizontal_distance(self, start: Point2D, end: Point2D) -> float:
+        """Return absolute horizontal distance in the measurement coordinate space."""
+        return abs(self.horizontal_delta(start, end))
+
+    def horizontal_delta(self, start: Point2D, end: Point2D) -> float:
+        """Return signed horizontal delta in the measurement coordinate space."""
+        measured_start = self.point(start)
+        measured_end = self.point(end)
+        return measured_end.x - measured_start.x
+
+    def vector_angle_degrees(self, start: Point2D, end: Point2D) -> float:
+        """Return vector angle in the measurement coordinate space."""
+        measured_start = self.point(start)
+        measured_end = self.point(end)
+        return vector_angle_degrees(measured_start, measured_end)
+
+    def angle_between_vectors_degrees(
+        self,
+        first_start: Point2D,
+        first_end: Point2D,
+        second_start: Point2D,
+        second_end: Point2D,
+    ) -> float:
+        """Return vector angle difference in the measurement coordinate space."""
+        return angle_between_vectors_degrees(
+            self.point(first_start),
+            self.point(first_end),
+            self.point(second_start),
+            self.point(second_end),
+        )
+
+    def joint_angle_degrees(self, first: Point2D, middle: Point2D, last: Point2D) -> float:
+        """Return joint angle in the measurement coordinate space."""
+        return joint_angle_degrees(self.point(first), self.point(middle), self.point(last))
+
+
+@dataclass(frozen=True)
 class _DetectedPhasePositions:
     positions: tuple[int, int, int, int, int]
     sequence_confidence: float
@@ -134,11 +221,18 @@ def resolve_body_sides(handedness: SwingHandedness) -> NormalizedBodySides:
 def detect_swing_phases(
     frames: Sequence[PoseFrame],
     provided_phase_frames: Mapping[SwingPhase, int] | None = None,
+    *,
+    frame_width: int | None = None,
+    frame_height: int | None = None,
 ) -> SwingPhaseFrames:
     """Return provided phases or detect representative event frames from pose motion."""
     if not frames:
         raise ValueError("At least one pose frame is required for swing phase detection.")
 
+    measurement_space = SwingMeasurementSpace.from_dimensions(
+        frame_width=frame_width,
+        frame_height=frame_height,
+    )
     ordered_frames = tuple(sorted(frames, key=lambda frame: frame.frame_index))
     frame_indexes = tuple(frame.frame_index for frame in ordered_frames)
     if provided_phase_frames is not None:
@@ -174,7 +268,7 @@ def detect_swing_phases(
             detection_methods={phase: "short_sequence_fallback" for phase in SwingPhase},
         )
 
-    detected = _detect_motion_aware_phase_positions(ordered_frames)
+    detected = _detect_motion_aware_phase_positions(ordered_frames, measurement_space)
     selected = tuple(ordered_frames[position].frame_index for position in detected.positions)
     return SwingPhaseFrames(
         setup=selected[0],
@@ -195,23 +289,65 @@ def calculate_swing_metrics(
     handedness: SwingHandedness,
     *,
     min_keypoint_confidence: float = 0.2,
+    frame_width: int | None = None,
+    frame_height: int | None = None,
 ) -> tuple[SwingMetricValue, ...]:
-    """Calculate raw v1 swing metrics from pose observations."""
+    """Calculate raw v2 baseline swing metrics from pose observations."""
     frame_by_index = {frame.frame_index: frame for frame in frames}
+    measurement_space = SwingMeasurementSpace.from_dimensions(
+        frame_width=frame_width,
+        frame_height=frame_height,
+    )
     sides = resolve_body_sides(handedness)
     limitations = (sides.limitation,) if sides.limitation else ()
     setup = frame_by_index[phases.setup]
     stride = frame_by_index[phases.stride]
     foot_strike = frame_by_index[phases.foot_strike]
     impact = frame_by_index[phases.impact]
+    follow_through = frame_by_index[phases.follow_through]
 
     return (
-        _shin_torso_parallelism(setup, stride, min_keypoint_confidence, limitations),
-        _early_connection_angle(foot_strike, sides, min_keypoint_confidence, limitations),
-        _lead_knee_blocking_index(foot_strike, impact, sides, min_keypoint_confidence),
-        _head_translation_ratio(setup, impact, min_keypoint_confidence),
-        _estimated_attack_angle(frames, phases, min_keypoint_confidence),
-        _hip_shoulder_separation_timing(frames, min_keypoint_confidence),
+        _normalized_stance_width(setup, min_keypoint_confidence, limitations, measurement_space),
+        _torso_forward_tilt(setup, min_keypoint_confidence, limitations, measurement_space),
+        _torso_tilt_preservation(
+            setup,
+            impact,
+            min_keypoint_confidence,
+            limitations,
+            measurement_space,
+        ),
+        _grip_loading_vector(setup, sides, min_keypoint_confidence, limitations, measurement_space),
+        _rear_knee_sway(
+            setup,
+            stride,
+            sides,
+            min_keypoint_confidence,
+            limitations,
+            measurement_space,
+        ),
+        _head_translation_ratio(setup, impact, min_keypoint_confidence, measurement_space),
+        _early_connection_angle(
+            foot_strike,
+            sides,
+            min_keypoint_confidence,
+            limitations,
+            measurement_space,
+        ),
+        _lead_knee_blocking_index(
+            foot_strike,
+            impact,
+            sides,
+            min_keypoint_confidence,
+            measurement_space,
+        ),
+        _hip_shoulder_separation_timing(frames, min_keypoint_confidence, measurement_space),
+        _estimated_attack_angle(frames, phases, min_keypoint_confidence, measurement_space),
+        _follow_through_posture_balance(
+            impact,
+            follow_through,
+            min_keypoint_confidence,
+            measurement_space,
+        ),
     )
 
 
@@ -250,8 +386,14 @@ def joint_angle_degrees(first: Point2D, middle: Point2D, last: Point2D) -> float
     return angle_between_vectors_degrees(middle, first, middle, last)
 
 
-def torso_length(frame: PoseFrame, *, min_confidence: float = 0.2) -> float | None:
+def torso_length(
+    frame: PoseFrame,
+    *,
+    min_confidence: float = 0.2,
+    measurement_space: SwingMeasurementSpace | None = None,
+) -> float | None:
     """Return a scale value from shoulder and hip midpoints."""
+    measurement_space = measurement_space or SwingMeasurementSpace()
     shoulder = _midpoint_keypoint(
         frame,
         PoseKeypointName.LEFT_SHOULDER,
@@ -266,7 +408,7 @@ def torso_length(frame: PoseFrame, *, min_confidence: float = 0.2) -> float | No
     )
     if shoulder is None or hip is None:
         return None
-    length = math.dist((shoulder.point.x, shoulder.point.y), (hip.point.x, hip.point.y))
+    length = measurement_space.distance(shoulder.point, hip.point)
     return length if length > 0.0 else None
 
 
@@ -283,15 +425,19 @@ def _spread_frame_indexes(frames: Sequence[PoseFrame], count: int) -> tuple[int,
     return tuple(frames[position].frame_index for position in positions)
 
 
-def _detect_motion_aware_phase_positions(frames: Sequence[PoseFrame]) -> _DetectedPhasePositions:
-    setup_position = _setup_position(frames)
-    movement_scores = _movement_scores(frames)
+def _detect_motion_aware_phase_positions(
+    frames: Sequence[PoseFrame],
+    measurement_space: SwingMeasurementSpace,
+) -> _DetectedPhasePositions:
+    setup_position = _setup_position(frames, measurement_space)
+    movement_scores = _movement_scores(frames, measurement_space)
     impact_position = _impact_position(frames, movement_scores)
     stride_position = _stride_position(frames, movement_scores, setup_position, impact_position)
     foot_strike_position = _foot_strike_position(
         frames,
         stride_position=stride_position,
         impact_position=impact_position,
+        measurement_space=measurement_space,
     )
     follow_position = min(len(frames) - 1, max(impact_position + 1, foot_strike_position + 1))
     positions = _ordered_unique_positions(
@@ -338,9 +484,12 @@ def _detect_motion_aware_phase_positions(frames: Sequence[PoseFrame]) -> _Detect
     )
 
 
-def _setup_position(frames: Sequence[PoseFrame]) -> int:
+def _setup_position(
+    frames: Sequence[PoseFrame],
+    measurement_space: SwingMeasurementSpace,
+) -> int:
     stable_limit = max(1, min(len(frames) // 4, 6))
-    movement_scores = _movement_scores(frames[: stable_limit + 1])
+    movement_scores = _movement_scores(frames[: stable_limit + 1], measurement_space)
     if not movement_scores:
         return 0
     return min(range(len(movement_scores)), key=lambda index: movement_scores[index])
@@ -375,32 +524,41 @@ def _foot_strike_position(
     *,
     stride_position: int,
     impact_position: int,
+    measurement_space: SwingMeasurementSpace,
 ) -> int:
     if impact_position - stride_position <= 1:
         return max(stride_position, impact_position - 1)
 
-    ankle_changes = _ankle_displacement_from_setup(frames)
+    ankle_changes = _ankle_displacement_from_setup(frames, measurement_space)
     search_positions = range(stride_position + 1, impact_position)
     if any(ankle_changes[position] > 0.01 for position in search_positions):
         return max(search_positions, key=lambda position: ankle_changes[position])
     return max(stride_position + 1, impact_position - 1)
 
 
-def _movement_scores(frames: Sequence[PoseFrame]) -> tuple[float, ...]:
+def _movement_scores(
+    frames: Sequence[PoseFrame],
+    measurement_space: SwingMeasurementSpace,
+) -> tuple[float, ...]:
     if not frames:
         return ()
     scores = [0.0]
     for index in range(1, len(frames)):
         previous = frames[index - 1]
         current = frames[index]
-        scale = torso_length(previous, min_confidence=0.1) or torso_length(
+        scale = torso_length(
+            previous,
+            min_confidence=0.1,
+            measurement_space=measurement_space,
+        ) or torso_length(
             current,
             min_confidence=0.1,
+            measurement_space=measurement_space,
         )
         scale = scale or 0.25
-        grip_score = _point_velocity(previous, current, _grip_point, scale)
-        ankle_score = _ankle_velocity(previous, current, scale)
-        rotation_score = _rotation_change(previous, current)
+        grip_score = _point_velocity(previous, current, _grip_point, scale, measurement_space)
+        ankle_score = _ankle_velocity(previous, current, scale, measurement_space)
+        rotation_score = _rotation_change(previous, current, measurement_space)
         scores.append(grip_score * 0.6 + ankle_score * 0.25 + rotation_score * 0.15)
     return tuple(scores)
 
@@ -410,19 +568,22 @@ def _point_velocity(
     current: PoseFrame,
     getter: Callable[[PoseFrame, float], PoseKeypoint | None],
     scale: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> float:
     previous_point = getter(previous, 0.1)
     current_point = getter(current, 0.1)
     if previous_point is None or current_point is None:
         return 0.0
-    distance = math.dist(
-        (previous_point.point.x, previous_point.point.y),
-        (current_point.point.x, current_point.point.y),
-    )
+    distance = measurement_space.distance(previous_point.point, current_point.point)
     return distance / max(scale, 0.01)
 
 
-def _ankle_velocity(previous: PoseFrame, current: PoseFrame, scale: float) -> float:
+def _ankle_velocity(
+    previous: PoseFrame,
+    current: PoseFrame,
+    scale: float,
+    measurement_space: SwingMeasurementSpace,
+) -> float:
     values: list[float] = []
     for side in (BodySide.LEFT, BodySide.RIGHT):
         name = side_keypoint(side, "ankle")
@@ -431,36 +592,50 @@ def _ankle_velocity(previous: PoseFrame, current: PoseFrame, scale: float) -> fl
         if previous_point is None or current_point is None:
             continue
         values.append(
-            math.dist(
-                (previous_point.point.x, previous_point.point.y),
-                (current_point.point.x, current_point.point.y),
-            )
-            / max(scale, 0.01)
+            measurement_space.distance(previous_point.point, current_point.point) / max(scale, 0.01)
         )
     return max(values, default=0.0)
 
 
-def _rotation_change(previous: PoseFrame, current: PoseFrame) -> float:
+def _rotation_change(
+    previous: PoseFrame,
+    current: PoseFrame,
+    measurement_space: SwingMeasurementSpace,
+) -> float:
     changes: list[float] = []
     for part in ("hip", "shoulder"):
         previous_vector = _side_to_side_vector(previous, part, 0.1)
         current_vector = _side_to_side_vector(current, part, 0.1)
         if previous_vector is None or current_vector is None:
             continue
-        previous_angle = vector_angle_degrees(previous_vector[0].point, previous_vector[1].point)
-        current_angle = vector_angle_degrees(current_vector[0].point, current_vector[1].point)
+        previous_angle = measurement_space.vector_angle_degrees(
+            previous_vector[0].point,
+            previous_vector[1].point,
+        )
+        current_angle = measurement_space.vector_angle_degrees(
+            current_vector[0].point,
+            current_vector[1].point,
+        )
         changes.append(angle_difference_degrees(current_angle, previous_angle) / 45.0)
     return max(changes, default=0.0)
 
 
-def _ankle_displacement_from_setup(frames: Sequence[PoseFrame]) -> tuple[float, ...]:
+def _ankle_displacement_from_setup(
+    frames: Sequence[PoseFrame],
+    measurement_space: SwingMeasurementSpace,
+) -> tuple[float, ...]:
     setup = frames[0]
     values: list[float] = []
     for frame in frames:
         frame_values: list[float] = []
-        scale = torso_length(setup, min_confidence=0.1) or torso_length(
+        scale = torso_length(
+            setup,
+            min_confidence=0.1,
+            measurement_space=measurement_space,
+        ) or torso_length(
             frame,
             min_confidence=0.1,
+            measurement_space=measurement_space,
         )
         scale = scale or 0.25
         for side in (BodySide.LEFT, BodySide.RIGHT):
@@ -469,7 +644,10 @@ def _ankle_displacement_from_setup(frames: Sequence[PoseFrame]) -> tuple[float, 
             frame_point = frame.get(name, min_confidence=0.1)
             if setup_point is None or frame_point is None:
                 continue
-            frame_values.append(abs(frame_point.point.x - setup_point.point.x) / max(scale, 0.01))
+            frame_values.append(
+                measurement_space.horizontal_distance(frame_point.point, setup_point.point)
+                / max(scale, 0.01)
+            )
         values.append(max(frame_values, default=0.0))
     return tuple(values)
 
@@ -492,38 +670,180 @@ def _ordered_unique_positions(
     return (output[0], output[1], output[2], output[3], output[4])
 
 
-def _shin_torso_parallelism(
-    setup: PoseFrame,
-    stride: PoseFrame,
+def _normalized_stance_width(
+    frame: PoseFrame,
     min_confidence: float,
     base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
-    values: list[float] = []
-    confidences: list[float] = []
-    for frame in (setup, stride):
-        torso = _torso_vector(frame, min_confidence)
-        if torso is None:
-            continue
-        torso_angle = vector_angle_degrees(torso[0].point, torso[1].point)
-        confidences.extend([torso[0].confidence, torso[1].confidence])
-        for side in (BodySide.LEFT, BodySide.RIGHT):
-            ankle = frame.get(side_keypoint(side, "ankle"), min_confidence=min_confidence)
-            knee = frame.get(side_keypoint(side, "knee"), min_confidence=min_confidence)
-            if ankle is None or knee is None:
-                continue
-            shin_angle = vector_angle_degrees(ankle.point, knee.point)
-            values.append(angle_difference_degrees(shin_angle, torso_angle))
-            confidences.extend([ankle.confidence, knee.confidence])
-    if not values:
+    left_ankle = frame.get(PoseKeypointName.LEFT_ANKLE, min_confidence=min_confidence)
+    right_ankle = frame.get(PoseKeypointName.RIGHT_ANKLE, min_confidence=min_confidence)
+    scale = torso_length(
+        frame,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
+    if left_ankle is None or right_ankle is None or scale is None:
         return _missing_metric(
-            SwingMetricName.SHIN_TORSO_PARALLELISM,
-            "Required shin or torso keypoints were missing.",
-            (setup.frame_index, stride.frame_index),
+            SwingMetricName.NORMALIZED_STANCE_WIDTH,
+            "Required ankle or torso scale keypoints were missing.",
+            (frame.frame_index,),
         )
     return SwingMetricValue(
-        name=SwingMetricName.SHIN_TORSO_PARALLELISM,
-        value=mean(values),
-        confidence=min(confidences),
+        name=SwingMetricName.NORMALIZED_STANCE_WIDTH,
+        value=measurement_space.horizontal_distance(left_ankle.point, right_ankle.point) / scale,
+        confidence=min(left_ankle.confidence, right_ankle.confidence),
+        evidence_frames=(frame.frame_index,),
+        limitations=base_limitations,
+    )
+
+
+def _torso_forward_tilt(
+    frame: PoseFrame,
+    min_confidence: float,
+    base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
+) -> SwingMetricValue:
+    torso = _torso_vector(frame, min_confidence)
+    if torso is None:
+        return _missing_metric(
+            SwingMetricName.TORSO_FORWARD_TILT,
+            "Required torso keypoints were missing.",
+            (frame.frame_index,),
+        )
+    angle = measurement_space.vector_angle_degrees(torso[0].point, torso[1].point)
+    tilt = angle_difference_degrees(angle, -90.0)
+    return SwingMetricValue(
+        name=SwingMetricName.TORSO_FORWARD_TILT,
+        value=tilt,
+        confidence=min(torso[0].confidence, torso[1].confidence),
+        evidence_frames=(frame.frame_index,),
+        limitations=base_limitations,
+    )
+
+
+def _torso_tilt_preservation(
+    setup: PoseFrame,
+    impact: PoseFrame,
+    min_confidence: float,
+    base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
+) -> SwingMetricValue:
+    setup_tilt = _torso_forward_tilt(setup, min_confidence, (), measurement_space)
+    impact_tilt = _torso_forward_tilt(impact, min_confidence, (), measurement_space)
+    if setup_tilt.value is None or impact_tilt.value is None:
+        return _missing_metric(
+            SwingMetricName.TORSO_TILT_PRESERVATION,
+            "Required torso keypoints were missing at setup or impact.",
+            (setup.frame_index, impact.frame_index),
+        )
+    return SwingMetricValue(
+        name=SwingMetricName.TORSO_TILT_PRESERVATION,
+        value=abs(impact_tilt.value - setup_tilt.value),
+        confidence=min(setup_tilt.confidence, impact_tilt.confidence),
+        evidence_frames=(setup.frame_index, impact.frame_index),
+        limitations=base_limitations,
+    )
+
+
+def _grip_loading_vector(
+    frame: PoseFrame,
+    sides: NormalizedBodySides,
+    min_confidence: float,
+    base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
+) -> SwingMetricValue:
+    grip = _grip_point(frame, min_confidence)
+    rear_ankle = frame.get(side_keypoint(sides.rear, "ankle"), min_confidence=min_confidence)
+    rear_heel = frame.get(side_keypoint(sides.rear, "heel"), min_confidence=min_confidence)
+    rear_foot = frame.get(
+        side_keypoint(sides.rear, "foot_index"),
+        min_confidence=min_confidence,
+    )
+    rear_shoulder = frame.get(
+        side_keypoint(sides.rear, "shoulder"),
+        min_confidence=min_confidence,
+    )
+    head = _head_keypoint(frame, min_confidence)
+    scale = torso_length(
+        frame,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
+    if grip is None or rear_ankle is None or rear_shoulder is None or head is None or scale is None:
+        return _missing_metric(
+            SwingMetricName.GRIP_LOADING_VECTOR,
+            "Required grip, rear foot, shoulder, head, or torso scale keypoints were missing.",
+            (frame.frame_index,),
+        )
+
+    support_points = [measurement_space.point(rear_ankle.point)]
+    if rear_heel is not None:
+        support_points.append(measurement_space.point(rear_heel.point))
+    if rear_foot is not None:
+        support_points.append(measurement_space.point(rear_foot.point))
+    support_min_x = min(point.x for point in support_points)
+    support_max_x = max(point.x for point in support_points)
+    grip_point = measurement_space.point(grip.point)
+    head_point = measurement_space.point(head.point)
+    rear_shoulder_point = measurement_space.point(rear_shoulder.point)
+    horizontal_excess = max(0.0, support_min_x - grip_point.x, grip_point.x - support_max_x)
+    high_y = min(head_point.y, rear_shoulder_point.y)
+    low_y = max(head_point.y, rear_shoulder_point.y)
+    vertical_excess = max(0.0, high_y - grip_point.y, grip_point.y - low_y)
+    return SwingMetricValue(
+        name=SwingMetricName.GRIP_LOADING_VECTOR,
+        value=max(horizontal_excess, vertical_excess) / scale,
+        confidence=min(
+            grip.confidence,
+            rear_ankle.confidence,
+            rear_shoulder.confidence,
+            head.confidence,
+        ),
+        evidence_frames=(frame.frame_index,),
+        limitations=base_limitations,
+    )
+
+
+def _rear_knee_sway(
+    setup: PoseFrame,
+    stride: PoseFrame,
+    sides: NormalizedBodySides,
+    min_confidence: float,
+    base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
+) -> SwingMetricValue:
+    setup_rear_ankle = setup.get(
+        side_keypoint(sides.rear, "ankle"),
+        min_confidence=min_confidence,
+    )
+    stride_rear_knee = stride.get(
+        side_keypoint(sides.rear, "knee"),
+        min_confidence=min_confidence,
+    )
+    scale = torso_length(
+        setup,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
+    if setup_rear_ankle is None or stride_rear_knee is None or scale is None:
+        return _missing_metric(
+            SwingMetricName.REAR_KNEE_SWAY,
+            "Required rear knee, rear ankle, or torso scale keypoints were missing.",
+            (setup.frame_index, stride.frame_index),
+        )
+    lead_ankle = setup.get(side_keypoint(sides.lead, "ankle"), min_confidence=min_confidence)
+    forward_sign = (
+        1.0 if lead_ankle is not None and lead_ankle.point.x >= setup_rear_ankle.point.x else -1.0
+    )
+    outward_distance = -forward_sign * measurement_space.horizontal_delta(
+        setup_rear_ankle.point,
+        stride_rear_knee.point,
+    )
+    return SwingMetricValue(
+        name=SwingMetricName.REAR_KNEE_SWAY,
+        value=max(0.0, outward_distance / scale),
+        confidence=min(setup_rear_ankle.confidence, stride_rear_knee.confidence),
         evidence_frames=(setup.frame_index, stride.frame_index),
         limitations=base_limitations,
     )
@@ -534,6 +854,7 @@ def _early_connection_angle(
     sides: NormalizedBodySides,
     min_confidence: float,
     base_limitations: tuple[str, ...],
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
     torso = _torso_vector(frame, min_confidence)
     shoulder = frame.get(side_keypoint(sides.lead, "shoulder"), min_confidence=min_confidence)
@@ -545,7 +866,7 @@ def _early_connection_angle(
             (frame.frame_index,),
         )
     try:
-        value = angle_between_vectors_degrees(
+        value = measurement_space.angle_between_vectors_degrees(
             torso[0].point,
             torso[1].point,
             shoulder.point,
@@ -576,9 +897,10 @@ def _lead_knee_blocking_index(
     impact: PoseFrame,
     sides: NormalizedBodySides,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
-    foot_angle = _side_knee_angle(foot_strike, sides.lead, min_confidence)
-    impact_angle = _side_knee_angle(impact, sides.lead, min_confidence)
+    foot_angle = _side_knee_angle(foot_strike, sides.lead, min_confidence, measurement_space)
+    impact_angle = _side_knee_angle(impact, sides.lead, min_confidence, measurement_space)
     if foot_angle is None or impact_angle is None:
         return _missing_metric(
             SwingMetricName.LEAD_KNEE_BLOCKING_INDEX,
@@ -597,10 +919,15 @@ def _head_translation_ratio(
     setup: PoseFrame,
     impact: PoseFrame,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
     setup_head = _head_keypoint(setup, min_confidence)
     impact_head = _head_keypoint(impact, min_confidence)
-    scale = torso_length(setup, min_confidence=min_confidence)
+    scale = torso_length(
+        setup,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
     if setup_head is None or impact_head is None or scale is None:
         return _missing_metric(
             SwingMetricName.HEAD_TRANSLATION_RATIO,
@@ -609,7 +936,7 @@ def _head_translation_ratio(
         )
     return SwingMetricValue(
         name=SwingMetricName.HEAD_TRANSLATION_RATIO,
-        value=abs(impact_head.point.x - setup_head.point.x) / scale,
+        value=measurement_space.horizontal_distance(impact_head.point, setup_head.point) / scale,
         confidence=min(setup_head.confidence, impact_head.confidence),
         evidence_frames=(setup.frame_index, impact.frame_index),
     )
@@ -619,6 +946,7 @@ def _estimated_attack_angle(
     frames: Sequence[PoseFrame],
     phases: SwingPhaseFrames,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
     frame_by_index = {frame.frame_index: frame for frame in frames}
     impact = frame_by_index[phases.impact]
@@ -628,7 +956,7 @@ def _estimated_attack_angle(
         min_confidence=min_confidence,
     )
     if grip is not None and bat is not None:
-        angle = -vector_angle_degrees(grip.point, bat.point)
+        angle = -measurement_space.vector_angle_degrees(grip.point, bat.point)
         return SwingMetricValue(
             name=SwingMetricName.ESTIMATED_ATTACK_ANGLE,
             value=angle,
@@ -645,7 +973,7 @@ def _estimated_attack_angle(
             "Required wrist/grip or bat keypoints were missing.",
             (phases.foot_strike, phases.impact),
         )
-    angle = -vector_angle_degrees(grip_start.point, grip_end.point)
+    angle = -measurement_space.vector_angle_degrees(grip_start.point, grip_end.point)
     return SwingMetricValue(
         name=SwingMetricName.ESTIMATED_ATTACK_ANGLE,
         value=angle,
@@ -660,6 +988,7 @@ def _estimated_attack_angle(
 def _hip_shoulder_separation_timing(
     frames: Sequence[PoseFrame],
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> SwingMetricValue:
     if len(frames) < 3:
         return _missing_metric(
@@ -676,9 +1005,11 @@ def _hip_shoulder_separation_timing(
         shoulders = _side_to_side_vector(frame, "shoulder", min_confidence)
         if hips is None or shoulders is None:
             continue
-        hip_angles.append((index, vector_angle_degrees(hips[0].point, hips[1].point)))
+        hip_angles.append(
+            (index, measurement_space.vector_angle_degrees(hips[0].point, hips[1].point))
+        )
         shoulder_angles.append(
-            (index, vector_angle_degrees(shoulders[0].point, shoulders[1].point))
+            (index, measurement_space.vector_angle_degrees(shoulders[0].point, shoulders[1].point))
         )
         confidences.extend(
             [
@@ -710,6 +1041,48 @@ def _hip_shoulder_separation_timing(
         value=float(shoulder_onset - hip_onset),
         confidence=min(confidences),
         evidence_frames=(frames[hip_onset].frame_index, frames[shoulder_onset].frame_index),
+    )
+
+
+def _follow_through_posture_balance(
+    impact: PoseFrame,
+    follow_through: PoseFrame,
+    min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
+) -> SwingMetricValue:
+    impact_tilt = _torso_forward_tilt(impact, min_confidence, (), measurement_space)
+    follow_tilt = _torso_forward_tilt(follow_through, min_confidence, (), measurement_space)
+    impact_head = _head_keypoint(impact, min_confidence)
+    follow_head = _head_keypoint(follow_through, min_confidence)
+    scale = torso_length(
+        impact,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
+    if (
+        impact_tilt.value is None
+        or follow_tilt.value is None
+        or impact_head is None
+        or follow_head is None
+        or scale is None
+    ):
+        return _missing_metric(
+            SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE,
+            "Required torso, head, or torso scale keypoints were missing.",
+            (impact.frame_index, follow_through.frame_index),
+        )
+    tilt_change = abs(follow_tilt.value - impact_tilt.value)
+    head_drift = measurement_space.horizontal_distance(follow_head.point, impact_head.point) / scale
+    return SwingMetricValue(
+        name=SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE,
+        value=tilt_change + (head_drift * 20.0),
+        confidence=min(
+            impact_tilt.confidence,
+            follow_tilt.confidence,
+            impact_head.confidence,
+            follow_head.confidence,
+        ),
+        evidence_frames=(impact.frame_index, follow_through.frame_index),
     )
 
 
@@ -806,13 +1179,14 @@ def _side_knee_angle(
     frame: PoseFrame,
     side: BodySide,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[float, float] | None:
     hip = frame.get(side_keypoint(side, "hip"), min_confidence=min_confidence)
     knee = frame.get(side_keypoint(side, "knee"), min_confidence=min_confidence)
     ankle = frame.get(side_keypoint(side, "ankle"), min_confidence=min_confidence)
     if hip is None or knee is None or ankle is None:
         return None
-    return joint_angle_degrees(hip.point, knee.point, ankle.point), min(
+    return measurement_space.joint_angle_degrees(hip.point, knee.point, ankle.point), min(
         hip.confidence,
         knee.confidence,
         ankle.confidence,

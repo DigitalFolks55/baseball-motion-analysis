@@ -86,8 +86,8 @@ Current limitations:
 
 ## Motion Analysis and Feedback
 
-Status: Swing evaluation foundation and video-driven local web motion-analysis UI
-implemented with MediaPipe local body-pose estimation.
+Status: Swing evaluation v2 baseline methodology and video-driven local web
+motion-analysis UI implemented with MediaPipe local body-pose estimation.
 
 The analysis workflow should run locally:
 
@@ -113,12 +113,21 @@ Current foundation:
 - Advanced pose debug controls can run `Single pose`, a raw single-pose MediaPipe
   diagnostic mode, and can switch the replay overlay between stabilized and raw pose
   data.
+- Swing analysis now returns `methodology_version: swing_evaluation_v2`; v2 replaces the
+  normal v1 checklist-style scoring semantics.
 - Swing phases can be provided by internal/test callers, while the normal automatic path
   estimates setup, stride, foot strike, impact, and follow-through from wrist/grip
   velocity, foot movement, and hip/shoulder rotation cues.
-- Swing metrics include shin-torso parallelism, early connection angle, lead knee
-  blocking, head translation, estimated attack angle, and hip-shoulder separation timing.
-- Rule-based swing fault candidates include door swing / casting, forward axis drift,
+- Swing v2 metrics include normalized stance width, torso forward tilt, torso tilt
+  preservation, grip loading vector, rear knee sway, head translation ratio, early
+  connection angle, lead knee blocking, hip-shoulder separation timing, estimated attack
+  angle, and follow-through posture/balance.
+- Stored-video swing v2 geometry uses source frame width and height so distances,
+  displacements, vector angles, and joint angles are measured in aspect-aware image
+  coordinates before torso-length normalization. Direct pose-sequence analysis can also
+  accept frame dimensions; when dimensions are not supplied it keeps a normalized-unit
+  fallback for compatibility.
+- Rule-based swing error candidates include door swing / casting, forward axis drift,
   arms-only / one-piece swing, excessive upper swing / early extension, and collapsed
   lead side.
 - The application-service boundary returns an in-memory analysis result and feedback
@@ -130,10 +139,27 @@ Current foundation:
   through application services and calls `SwingVideoAnalysisApplicationService`.
 - Swing analysis results are displayed locally with overall score, phase scores, metrics,
   detected faults, feedback, confidence, and limitations.
-- The revised browser UI keeps upload and the video library on the left, gives the replay
-  video a wider right-side area, and places motion analysis across the bottom.
+- The browser result view displays the returned methodology and metric units, while
+  thresholds and baseball rules remain in domain services.
+- The revised browser UI keeps upload and the scrollable video library on the left,
+  gives the replay video a wider right-side area, and places motion analysis across the
+  bottom.
 - The replay panel overlays returned pose keypoints and automatic event-frame metadata on
   top of the video after analysis completes.
+- Stored-video swing analysis returns optional v2 evaluation-line primitives for metric
+  evidence, and the replay toolbar has independent `Poses` and `Evaluation Lines`
+  toggles with a `Metric` dropdown before `Speed`.
+- The `Poses` toggle shows or hides pose skeletons and keypoints. Pose keypoint text tags
+  are disabled by default to reduce replay clutter.
+- The `Evaluation Lines` toggle shows or hides service-returned metric evidence lines
+  without rerunning analysis, changing speed, or changing replay selection.
+- The compact `Metric` dropdown is populated from the current result's returned
+  `evaluation_overlay.metric_name` values. `All metrics` preserves existing all-line
+  behavior, while checking one or more metrics filters the drawn evaluation lines without
+  changing analysis results or playback speed.
+- Evidence-heavy metric and detected-fault result cells are bounded and vertically
+  scrollable so long frame lists or evidence text do not expand the analysis layout. The
+  `Metrics` table keeps the evidence column compact for frame-number lists.
 - A `Clear Analysis` button removes current results and overlays without deleting media.
 - Results include compact sampling diagnostics, pose-quality diagnostics, and per-event
   phase confidence to explain low-quality analysis.
@@ -155,8 +181,11 @@ Current limitations:
 - `Single pose` mode is diagnostic-only and should not be treated as the final coached
   evaluation path.
 - MediaPipe detects player body landmarks only. It does not detect bat tip, bat barrel,
-  or ball position.
+  or ball position; evaluation lines that would need bat evidence use lower-confidence
+  grip-path fallback styling or are skipped when evidence is missing.
 - Automatic phase detection is motion-aware but still heuristic and not calibrated from a
   large real swing dataset.
+- Some v2 thresholds are provisional and configurable until validated against calibrated
+  swing fixtures.
 - Report persistence is not implemented.
 - Fielding, throwing, and pitching analysis remain planned.

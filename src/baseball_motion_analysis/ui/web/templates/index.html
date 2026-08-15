@@ -68,16 +68,27 @@
       <section class="replay-panel review-column" aria-labelledby="replay-title">
         <div class="section-heading">
           <h2 id="replay-title">Replay</h2>
-          <label class="speed-control" for="playbackRate">
-            Speed
-            <select id="playbackRate">
-              <option value="0.25">0.25x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="1.5">1.5x</option>
-              <option value="2">2x</option>
-            </select>
-          </label>
+          <div class="replay-toolbar">
+            <button id="poseOverlayToggle" type="button" class="secondary overlay-toggle pose-overlay-toggle" aria-pressed="false" disabled>Poses</button>
+            <button id="evaluationLinesToggle" type="button" class="secondary evaluation-lines-toggle" aria-pressed="false" disabled>Evaluation Lines</button>
+            <div id="evaluationMetricControl" class="toolbar-field metric-control">
+              <span id="evaluationMetricLabel">Metric</span>
+              <div class="metric-dropdown">
+                <button id="evaluationMetricToggle" type="button" class="metric-dropdown-toggle" aria-haspopup="true" aria-expanded="false" aria-labelledby="evaluationMetricLabel evaluationMetricToggle" disabled>All metrics</button>
+                <div id="evaluationMetricMenu" class="metric-dropdown-menu" role="group" aria-labelledby="evaluationMetricLabel" hidden></div>
+              </div>
+            </div>
+            <label class="toolbar-field speed-control" for="playbackRate">
+              Speed
+              <select id="playbackRate">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <div class="replay-stage">
@@ -230,6 +241,10 @@
               <strong id="swingConfidence">-</strong>
               <p class="help-text">Confidence reflects visible keypoint quality, handedness certainty, and phase detection certainty.</p>
             </div>
+            <div>
+              <span class="score-label">Methodology</span>
+              <strong id="swingMethodology">-</strong>
+            </div>
           </div>
 
           <div class="analysis-block" aria-labelledby="swingFeedbackTitle">
@@ -272,15 +287,16 @@
           <div class="analysis-block" aria-labelledby="swingMetricsTitle">
             <h3 id="swingMetricsTitle">Metrics</h3>
             <div class="table-scroll">
-              <table>
+              <table class="metrics-table">
                 <thead>
                   <tr>
                     <th>Metric</th>
                     <th>Value</th>
+                    <th>Unit</th>
                     <th>Target</th>
                     <th>Severity</th>
                     <th>Deduction</th>
-                    <th>Evidence</th>
+                    <th class="metrics-evidence-column">Evidence</th>
                   </tr>
                 </thead>
                 <tbody id="swingMetrics"></tbody>
