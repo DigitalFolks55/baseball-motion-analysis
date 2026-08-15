@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from baseball_motion_analysis.app.main import create_app
 from baseball_motion_analysis.app.swing_services import SwingVideoAnalysisApplicationService
 from baseball_motion_analysis.core.config import AppSettings
+from baseball_motion_analysis.motion import SwingMetricName
 from baseball_motion_analysis.pose import (
     PoseDebugDiagnostics,
     PoseEstimationResult,
@@ -47,6 +48,11 @@ def test_swing_video_analysis_endpoint_returns_events_overlay_and_cached_pose(
     assert first_response.status_code == 200
     first_payload = first_response.json()
     assert first_payload["analysis"]["overall_score"] >= 0.0
+    assert first_payload["analysis"]["methodology_version"] == "swing_evaluation_v2"
+    assert any(
+        metric["name"] == "normalized_stance_width"
+        for metric in first_payload["analysis"]["metrics"]
+    )
     assert first_payload["feedback"]["summary"]
     assert first_payload["pose"]
     assert first_payload["raw_pose"]
@@ -72,6 +78,24 @@ def test_swing_video_analysis_endpoint_returns_events_overlay_and_cached_pose(
     assert first_payload["sampling_diagnostics"]["full_frame_sampling"] is True
     assert first_payload["overlay"]
     assert first_payload["raw_overlay"]
+    assert first_payload["evaluation_overlay"]
+    assert {line["metric_name"] for line in first_payload["evaluation_overlay"]} == {
+        metric_name.value for metric_name in SwingMetricName
+    }
+    evaluation_line = first_payload["evaluation_overlay"][0]
+    assert {
+        "metric_name",
+        "phase",
+        "frame_index",
+        "start",
+        "end",
+        "severity",
+        "confidence",
+        "style",
+        "color_role",
+    }.issubset(evaluation_line)
+    assert isinstance(evaluation_line["start"]["x"], float)
+    assert isinstance(evaluation_line["end"]["y"], float)
     assert first_payload["overlay"][0]["source"] == "stabilized"
     assert first_payload["raw_overlay"][0]["source"] == "raw"
     assert "interpolated" in first_payload["overlay"][0]["keypoints"][0]

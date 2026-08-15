@@ -14,7 +14,7 @@ from baseball_motion_analysis.app.swing_services import (
     SwingVideoAnalysisApplicationService,
     SwingVideoAnalysisError,
 )
-from baseball_motion_analysis.motion import SwingHandedness
+from baseball_motion_analysis.motion import SwingHandedness, SwingMetricName
 from baseball_motion_analysis.pose import (
     PoseDebugDiagnostics,
     PoseEstimationResult,
@@ -24,7 +24,7 @@ from baseball_motion_analysis.pose import (
 )
 from baseball_motion_analysis.storage import LocalMediaFileStore, SqliteMediaRepository
 from baseball_motion_analysis.video import FrameData
-from unit.swing_test_helpers import GOOD_PHASES, good_swing_frames
+from unit.swing_test_helpers import GOOD_PHASES, aspect_sensitive_swing_frames, good_swing_frames
 
 
 def test_swing_analysis_application_service_returns_analysis_and_feedback() -> None:
@@ -38,7 +38,11 @@ def test_swing_analysis_application_service_returns_analysis_and_feedback() -> N
         )
     )
 
+    assert response.analysis.methodology_version == "swing_evaluation_v2"
     assert response.analysis.overall_score > 90.0
+    assert any(
+        metric.name.value == "normalized_stance_width" for metric in response.analysis.metrics
+    )
     assert response.feedback.summary
     assert response.feedback.good_points
     assert response.feedback.confidence == response.analysis.confidence
@@ -77,11 +81,23 @@ def test_swing_video_analysis_application_service_estimates_pose_and_reuses_cach
         )
     )
 
+    assert first_response.analysis.methodology_version == "swing_evaluation_v2"
     assert first_response.analysis.overall_score >= 0.0
     assert len(first_response.pose_frames) == 7
     assert len(first_response.events) == 5
     assert first_response.overlay_frames
     assert first_response.raw_overlay_frames
+    assert first_response.evaluation_overlay
+    assert {line.metric_name for line in first_response.evaluation_overlay} == {
+        metric_name.value for metric_name in SwingMetricName
+    }
+    evaluation_line = first_response.evaluation_overlay[0]
+    assert evaluation_line.metric_name
+    assert evaluation_line.frame_index >= 0
+    assert isinstance(evaluation_line.start.x, float)
+    assert isinstance(evaluation_line.end.y, float)
+    assert evaluation_line.severity
+    assert 0.0 <= evaluation_line.confidence <= 1.0
     assert all(frame.source == "stabilized" for frame in first_response.overlay_frames)
     assert all(frame.source == "raw" for frame in first_response.raw_overlay_frames)
     assert first_response.pose_cache_hit is False
@@ -99,6 +115,53 @@ def test_swing_video_analysis_application_service_estimates_pose_and_reuses_cach
     assert all(
         PoseKeypointName.BAT_TIP not in frame.keypoints for frame in first_response.pose_frames
     )
+
+
+def test_swing_video_analysis_uses_media_dimensions_for_aspect_aware_metrics(
+    tmp_path: Path,
+) -> None:
+    library_service = _video_library_service(tmp_path)
+    video_path = _create_tiny_video(
+        tmp_path / "aspect-swing.avi",
+        frame_count=5,
+        fps=10.0,
+        width=32,
+        height=18,
+    )
+    staging_path = library_service.create_staging_file(".avi")
+    staging_path.write_bytes(video_path.read_bytes())
+    record = library_service.import_video(
+        ImportVideoRequest(
+            staging_path=staging_path,
+            display_name="aspect-swing.avi",
+            file_size_bytes=staging_path.stat().st_size,
+        )
+    )
+    service = SwingVideoAnalysisApplicationService(
+        video_library_service=library_service,
+        pose_estimator=NormalizedAspectPoseEstimator(),
+    )
+
+    response = service.analyze_video(
+        AnalyzeSwingVideoRequest(
+            media_id=record.media_id,
+            handedness=SwingHandedness.RIGHT_HANDED,
+        )
+    )
+
+    stance = next(
+        metric
+        for metric in response.analysis.metrics
+        if metric.name == SwingMetricName.NORMALIZED_STANCE_WIDTH
+    )
+    torso_tilt = next(
+        metric
+        for metric in response.analysis.metrics
+        if metric.name == SwingMetricName.TORSO_FORWARD_TILT
+    )
+    assert stance.value == pytest.approx(1.0264)
+    assert torso_tilt.value == pytest.approx(30.0)
+    assert response.evaluation_overlay
 
 
 def test_swing_video_analysis_default_estimator_requires_mediapipe_model_path(
@@ -171,6 +234,22 @@ class RecordingBodyPoseEstimator:
         )
 
 
+class NormalizedAspectPoseEstimator:
+    def estimate(self, frames: tuple[FrameData, ...]) -> PoseEstimationResult:
+        source_frames = aspect_sensitive_swing_frames()
+        pose_frames: list[PoseFrame] = []
+        for index, frame in enumerate(frames):
+            source = source_frames[min(index, len(source_frames) - 1)]
+            pose_frames.append(
+                PoseFrame(
+                    frame_index=frame.frame_index,
+                    timestamp_seconds=frame.timestamp_seconds,
+                    keypoints=source.keypoints,
+                )
+            )
+        return PoseEstimationResult(frames=tuple(pose_frames))
+
+
 def _video_library_service(tmp_path: Path) -> VideoLibraryApplicationService:
     return VideoLibraryApplicationService(
         repository=SqliteMediaRepository(tmp_path / "library.sqlite3"),
@@ -178,19 +257,26 @@ def _video_library_service(tmp_path: Path) -> VideoLibraryApplicationService:
     )
 
 
-def _create_tiny_video(path: Path, *, frame_count: int, fps: float) -> Path:
+def _create_tiny_video(
+    path: Path,
+    *,
+    frame_count: int,
+    fps: float,
+    width: int = 32,
+    height: int = 24,
+) -> Path:
     writer = cv2.VideoWriter(
         str(path),
         cv2.VideoWriter_fourcc(*"MJPG"),
         fps,
-        (32, 24),
+        (width, height),
     )
     if not writer.isOpened():
         pytest.skip("OpenCV could not create the tiny video fixture")
 
     try:
         for index in range(frame_count):
-            frame = np.full((24, 32, 3), index * 20, dtype=np.uint8)
+            frame = np.full((height, width, 3), index * 20, dtype=np.uint8)
             writer.write(frame)
     finally:
         writer.release()

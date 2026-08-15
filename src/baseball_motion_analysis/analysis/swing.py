@@ -10,6 +10,7 @@ from enum import StrEnum
 from baseball_motion_analysis.motion import (
     BodySide,
     SwingHandedness,
+    SwingMeasurementSpace,
     SwingMetricName,
     SwingMetricValue,
     SwingPhase,
@@ -20,7 +21,6 @@ from baseball_motion_analysis.motion import (
     resolve_body_sides,
     side_keypoint,
     torso_length,
-    vector_angle_degrees,
 )
 from baseball_motion_analysis.pose import PoseFrame, PoseKeypoint, PoseKeypointName
 
@@ -46,29 +46,41 @@ class SwingFaultType(StrEnum):
 
 @dataclass(frozen=True)
 class SwingAnalysisConfig:
-    """Configurable swing thresholds for conservative v1 rule evaluation."""
+    """Configurable swing thresholds for baseline-driven v2 rule evaluation."""
 
     min_keypoint_confidence: float = 0.2
-    shin_torso_warning_degrees: float = 18.0
-    shin_torso_severe_degrees: float = 32.0
+    stance_width_min_ratio: float = 1.0
+    stance_width_max_ratio: float = 1.2
+    stance_width_warning_margin_ratio: float = 0.25
+    stance_width_severe_margin_ratio: float = 0.45
+    torso_tilt_min_degrees: float = 25.0
+    torso_tilt_max_degrees: float = 35.0
+    torso_tilt_warning_margin_degrees: float = 10.0
+    torso_tilt_severe_margin_degrees: float = 20.0
+    torso_tilt_preservation_warning_degrees: float = 10.0
+    torso_tilt_preservation_severe_degrees: float = 20.0
+    grip_loading_warning_ratio: float = 0.12
+    grip_loading_severe_ratio: float = 0.25
+    rear_knee_sway_warning_ratio: float = 0.12
+    rear_knee_sway_severe_ratio: float = 0.25
+    head_translation_warning_ratio: float = 0.35
+    head_translation_severe_ratio: float = 0.55
     early_connection_min_degrees: float = 80.0
     early_connection_max_degrees: float = 105.0
     early_connection_warning_margin_degrees: float = 15.0
     early_connection_severe_margin_degrees: float = 30.0
     lead_knee_warning_flexion_degrees: float = -8.0
     lead_knee_severe_flexion_degrees: float = -20.0
-    head_translation_warning_ratio: float = 0.35
-    head_translation_severe_ratio: float = 0.55
+    hip_shoulder_min_lag_frames: float = 1.0
     attack_angle_min_degrees: float = 5.0
     attack_angle_max_degrees: float = 15.0
     excessive_attack_angle_degrees: float = 20.0
     attack_angle_severe_high_degrees: float = 30.0
     attack_angle_severe_low_degrees: float = -10.0
     wrist_chest_distance_ratio: float = 0.95
-    rear_knee_sway_ratio: float = 0.12
     lead_knee_forward_drift_ratio: float = 0.12
-    torso_tilt_change_warning_degrees: float = 18.0
-    hip_shoulder_min_lag_frames: float = 1.0
+    follow_through_warning_score: float = 10.0
+    follow_through_severe_score: float = 22.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +91,7 @@ class SwingMetricResult:
     value: float | None
     target_min: float | None
     target_max: float | None
+    unit: str
     severity: SwingSeverity
     confidence: float
     evidence_frames: tuple[int, ...]
@@ -113,6 +126,7 @@ class SwingPhaseScore:
 class SwingAnalysisResult:
     """Complete rule and score result for a swing."""
 
+    methodology_version: str
     overall_score: float
     phase_scores: tuple[SwingPhaseScore, ...]
     metrics: tuple[SwingMetricResult, ...]
@@ -134,12 +148,31 @@ _PHASE_WEIGHTS: Mapping[SwingPhase, float] = {
 }
 
 _METRIC_PHASES: Mapping[SwingMetricName, SwingPhase] = {
-    SwingMetricName.SHIN_TORSO_PARALLELISM: SwingPhase.SETUP,
+    SwingMetricName.NORMALIZED_STANCE_WIDTH: SwingPhase.SETUP,
+    SwingMetricName.TORSO_FORWARD_TILT: SwingPhase.SETUP,
+    SwingMetricName.GRIP_LOADING_VECTOR: SwingPhase.SETUP,
+    SwingMetricName.REAR_KNEE_SWAY: SwingPhase.STRIDE,
     SwingMetricName.HEAD_TRANSLATION_RATIO: SwingPhase.STRIDE,
     SwingMetricName.EARLY_CONNECTION_ANGLE: SwingPhase.FOOT_STRIKE,
     SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: SwingPhase.FOOT_STRIKE,
+    SwingMetricName.TORSO_TILT_PRESERVATION: SwingPhase.IMPACT,
     SwingMetricName.LEAD_KNEE_BLOCKING_INDEX: SwingPhase.IMPACT,
     SwingMetricName.ESTIMATED_ATTACK_ANGLE: SwingPhase.IMPACT,
+    SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE: SwingPhase.FOLLOW_THROUGH,
+}
+
+_METRIC_UNITS: Mapping[SwingMetricName, str] = {
+    SwingMetricName.NORMALIZED_STANCE_WIDTH: "torso_lengths",
+    SwingMetricName.TORSO_FORWARD_TILT: "degrees",
+    SwingMetricName.TORSO_TILT_PRESERVATION: "degrees",
+    SwingMetricName.GRIP_LOADING_VECTOR: "torso_lengths_outside_baseline",
+    SwingMetricName.REAR_KNEE_SWAY: "torso_lengths",
+    SwingMetricName.HEAD_TRANSLATION_RATIO: "torso_lengths",
+    SwingMetricName.EARLY_CONNECTION_ANGLE: "degrees",
+    SwingMetricName.LEAD_KNEE_BLOCKING_INDEX: "degrees",
+    SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: "frames",
+    SwingMetricName.ESTIMATED_ATTACK_ANGLE: "degrees",
+    SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE: "posture_score",
 }
 
 
@@ -149,21 +182,41 @@ def analyze_swing(
     handedness: SwingHandedness = SwingHandedness.UNKNOWN,
     phase_frames: Mapping[SwingPhase, int] | None = None,
     config: SwingAnalysisConfig | None = None,
+    frame_width: int | None = None,
+    frame_height: int | None = None,
 ) -> SwingAnalysisResult:
     """Analyze one swing pose sequence and return scores, faults, and confidence."""
     if not frames:
         raise ValueError("At least one pose frame is required for swing analysis.")
     ordered_frames = tuple(sorted(frames, key=lambda frame: frame.frame_index))
     evaluation_config = config or SwingAnalysisConfig()
-    phases = detect_swing_phases(ordered_frames, phase_frames)
+    measurement_space = SwingMeasurementSpace.from_dimensions(
+        frame_width=frame_width,
+        frame_height=frame_height,
+    )
+    phases = detect_swing_phases(
+        ordered_frames,
+        phase_frames,
+        frame_width=frame_width,
+        frame_height=frame_height,
+    )
     raw_metrics = calculate_swing_metrics(
         ordered_frames,
         phases,
         handedness,
         min_keypoint_confidence=evaluation_config.min_keypoint_confidence,
+        frame_width=frame_width,
+        frame_height=frame_height,
     )
     metrics = tuple(_evaluate_metric(metric, evaluation_config) for metric in raw_metrics)
-    faults = _detect_faults(ordered_frames, phases, handedness, metrics, evaluation_config)
+    faults = _detect_faults(
+        ordered_frames,
+        phases,
+        handedness,
+        metrics,
+        evaluation_config,
+        measurement_space,
+    )
     phase_scores = _score_phases(metrics)
     limitations = _collect_limitations(phases, raw_metrics, handedness)
     confidence = _aggregate_confidence(metrics, phases.confidence)
@@ -171,6 +224,7 @@ def analyze_swing(
     overall_score = sum(score.score * score.weight for score in phase_scores)
 
     return SwingAnalysisResult(
+        methodology_version="swing_evaluation_v2",
         overall_score=round(overall_score, 2),
         phase_scores=phase_scores,
         metrics=metrics,
@@ -194,6 +248,7 @@ def _evaluate_metric(
             value=None,
             target_min=None,
             target_max=None,
+            unit=_METRIC_UNITS[metric.name],
             severity=SwingSeverity.NOT_EVALUATED,
             confidence=0.0,
             evidence_frames=metric.evidence_frames,
@@ -203,33 +258,122 @@ def _evaluate_metric(
         )
 
     evaluators = {
-        SwingMetricName.SHIN_TORSO_PARALLELISM: _evaluate_shin_torso,
+        SwingMetricName.NORMALIZED_STANCE_WIDTH: _evaluate_stance_width,
+        SwingMetricName.TORSO_FORWARD_TILT: _evaluate_torso_forward_tilt,
+        SwingMetricName.TORSO_TILT_PRESERVATION: _evaluate_torso_tilt_preservation,
+        SwingMetricName.GRIP_LOADING_VECTOR: _evaluate_grip_loading,
+        SwingMetricName.REAR_KNEE_SWAY: _evaluate_rear_knee_sway,
+        SwingMetricName.HEAD_TRANSLATION_RATIO: _evaluate_head_translation,
         SwingMetricName.EARLY_CONNECTION_ANGLE: _evaluate_early_connection,
         SwingMetricName.LEAD_KNEE_BLOCKING_INDEX: _evaluate_lead_knee_blocking,
-        SwingMetricName.HEAD_TRANSLATION_RATIO: _evaluate_head_translation,
-        SwingMetricName.ESTIMATED_ATTACK_ANGLE: _evaluate_attack_angle,
         SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: _evaluate_hip_shoulder_timing,
+        SwingMetricName.ESTIMATED_ATTACK_ANGLE: _evaluate_attack_angle,
+        SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE: _evaluate_follow_through,
     }
     return evaluators[metric.name](metric, config)
 
 
-def _evaluate_shin_torso(
+def _evaluate_stance_width(
+    metric: SwingMetricValue,
+    config: SwingAnalysisConfig,
+) -> SwingMetricResult:
+    value = _require_value(metric)
+    penalty, severity = _range_penalty(
+        value,
+        target_min=config.stance_width_min_ratio,
+        target_max=config.stance_width_max_ratio,
+        warning_margin=config.stance_width_warning_margin_ratio,
+        severe_margin=config.stance_width_severe_margin_ratio,
+    )
+    return _result(
+        metric,
+        target_min=config.stance_width_min_ratio,
+        target_max=config.stance_width_max_ratio,
+        severity=severity,
+        penalty=penalty,
+        message="Stance width was normalized by torso length during setup.",
+    )
+
+
+def _evaluate_torso_forward_tilt(
+    metric: SwingMetricValue,
+    config: SwingAnalysisConfig,
+) -> SwingMetricResult:
+    value = _require_value(metric)
+    penalty, severity = _range_penalty(
+        value,
+        target_min=config.torso_tilt_min_degrees,
+        target_max=config.torso_tilt_max_degrees,
+        warning_margin=config.torso_tilt_warning_margin_degrees,
+        severe_margin=config.torso_tilt_severe_margin_degrees,
+    )
+    return _result(
+        metric,
+        target_min=config.torso_tilt_min_degrees,
+        target_max=config.torso_tilt_max_degrees,
+        severity=severity,
+        penalty=penalty,
+        message="Setup torso forward tilt was compared with the youth baseline.",
+    )
+
+
+def _evaluate_torso_tilt_preservation(
     metric: SwingMetricValue,
     config: SwingAnalysisConfig,
 ) -> SwingMetricResult:
     value = _require_value(metric)
     penalty, severity = _upper_bound_penalty(
         value,
-        warning=config.shin_torso_warning_degrees,
-        severe=config.shin_torso_severe_degrees,
+        warning=config.torso_tilt_preservation_warning_degrees,
+        severe=config.torso_tilt_preservation_severe_degrees,
     )
     return _result(
         metric,
         target_min=0.0,
-        target_max=config.shin_torso_warning_degrees,
+        target_max=config.torso_tilt_preservation_warning_degrees,
         severity=severity,
         penalty=penalty,
-        message="Shin and torso posture were compared during setup and stride.",
+        message="Torso forward tilt preservation was checked from setup to impact.",
+    )
+
+
+def _evaluate_grip_loading(
+    metric: SwingMetricValue,
+    config: SwingAnalysisConfig,
+) -> SwingMetricResult:
+    value = _require_value(metric)
+    penalty, severity = _upper_bound_penalty(
+        value,
+        warning=config.grip_loading_warning_ratio,
+        severe=config.grip_loading_severe_ratio,
+    )
+    return _result(
+        metric,
+        target_min=0.0,
+        target_max=config.grip_loading_warning_ratio,
+        severity=severity,
+        penalty=penalty,
+        message="Grip loading was checked against the ear-shoulder and rear-foot baseline.",
+    )
+
+
+def _evaluate_rear_knee_sway(
+    metric: SwingMetricValue,
+    config: SwingAnalysisConfig,
+) -> SwingMetricResult:
+    value = _require_value(metric)
+    penalty, severity = _upper_bound_penalty(
+        value,
+        warning=config.rear_knee_sway_warning_ratio,
+        severe=config.rear_knee_sway_severe_ratio,
+    )
+    return _result(
+        metric,
+        target_min=0.0,
+        target_max=config.rear_knee_sway_warning_ratio,
+        severity=severity,
+        penalty=penalty,
+        message="Rear knee sway was checked against the rear foot boundary during stride.",
     )
 
 
@@ -330,6 +474,26 @@ def _evaluate_attack_angle(
     )
 
 
+def _evaluate_follow_through(
+    metric: SwingMetricValue,
+    config: SwingAnalysisConfig,
+) -> SwingMetricResult:
+    value = _require_value(metric)
+    penalty, severity = _upper_bound_penalty(
+        value,
+        warning=config.follow_through_warning_score,
+        severe=config.follow_through_severe_score,
+    )
+    return _result(
+        metric,
+        target_min=0.0,
+        target_max=config.follow_through_warning_score,
+        severity=severity,
+        penalty=penalty,
+        message="Follow-through posture and head stability were checked after impact.",
+    )
+
+
 def _evaluate_hip_shoulder_timing(
     metric: SwingMetricValue,
     config: SwingAnalysisConfig,
@@ -372,6 +536,7 @@ def _result(
         value=round(_require_value(metric), 4),
         target_min=target_min,
         target_max=target_max,
+        unit=_METRIC_UNITS[metric.name],
         severity=severity,
         confidence=round(metric.confidence, 3),
         evidence_frames=metric.evidence_frames,
@@ -387,50 +552,65 @@ def _detect_faults(
     handedness: SwingHandedness,
     metrics: Sequence[SwingMetricResult],
     config: SwingAnalysisConfig,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[SwingFaultResult, ...]:
     metric_by_name = {metric.name: metric for metric in metrics}
     frame_by_index = {frame.frame_index: frame for frame in frames}
     sides = resolve_body_sides(handedness)
     faults: list[SwingFaultResult] = []
 
+    torso_tilt = metric_by_name[SwingMetricName.TORSO_FORWARD_TILT]
+    grip_loading = metric_by_name[SwingMetricName.GRIP_LOADING_VECTOR]
     early_connection = metric_by_name[SwingMetricName.EARLY_CONNECTION_ANGLE]
     wrist_chest_ratio = _wrist_chest_distance_ratio(
         frame_by_index[phases.foot_strike],
         sides.lead,
         config.min_keypoint_confidence,
+        measurement_space,
     )
-    if _is_problem(early_connection) or _ratio_exceeds(
-        wrist_chest_ratio,
-        config.wrist_chest_distance_ratio,
+    if (
+        _is_problem(torso_tilt)
+        or _is_problem(grip_loading)
+        or _is_problem(early_connection)
+        or _ratio_exceeds(
+            wrist_chest_ratio,
+            config.wrist_chest_distance_ratio,
+        )
     ):
         faults.append(
             SwingFaultResult(
                 fault_type=SwingFaultType.DOOR_SWING_CASTING,
                 phase=SwingPhase.FOOT_STRIKE,
-                severity=_fault_severity(early_connection),
-                confidence=max(early_connection.confidence, _ratio_confidence(wrist_chest_ratio)),
-                evidence="Lead arm connection or wrist distance suggests the hands may cast away.",
-                evidence_frames=early_connection.evidence_frames,
+                severity=_max_severity(torso_tilt, grip_loading, early_connection),
+                confidence=max(
+                    torso_tilt.confidence,
+                    grip_loading.confidence,
+                    early_connection.confidence,
+                    _ratio_confidence(wrist_chest_ratio),
+                ),
+                evidence=(
+                    "Setup posture, grip loading, lead arm connection, or wrist distance "
+                    "suggests the hands may cast away from the body."
+                ),
+                evidence_frames=_combined_evidence_frames(
+                    torso_tilt,
+                    grip_loading,
+                    early_connection,
+                ),
             )
         )
 
     head_translation = metric_by_name[SwingMetricName.HEAD_TRANSLATION_RATIO]
-    rear_knee_sway = _rear_knee_sway_ratio(
-        frame_by_index[phases.setup],
-        frame_by_index[phases.stride],
-        sides.rear,
-        sides.lead,
-        config.min_keypoint_confidence,
-    )
-    if _is_problem(head_translation) or _ratio_exceeds(rear_knee_sway, config.rear_knee_sway_ratio):
+    rear_knee_sway = metric_by_name[SwingMetricName.REAR_KNEE_SWAY]
+    if _is_problem(head_translation) or _is_problem(rear_knee_sway):
         faults.append(
             SwingFaultResult(
                 fault_type=SwingFaultType.FORWARD_AXIS_DRIFT_RUSHING,
                 phase=SwingPhase.STRIDE,
-                severity=_fault_severity(head_translation),
-                confidence=max(head_translation.confidence, _ratio_confidence(rear_knee_sway)),
+                severity=_max_severity(head_translation, rear_knee_sway),
+                confidence=max(head_translation.confidence, rear_knee_sway.confidence),
                 evidence="Head movement or rear-knee sway suggests early forward drift.",
-                evidence_frames=head_translation.evidence_frames,
+                evidence_frames=_combined_evidence_frames(head_translation, rear_knee_sway),
             )
         )
 
@@ -448,23 +628,17 @@ def _detect_faults(
         )
 
     attack = metric_by_name[SwingMetricName.ESTIMATED_ATTACK_ANGLE]
-    torso_tilt_change = _torso_tilt_change(
-        frame_by_index[phases.setup],
-        frame_by_index[phases.impact],
-        config.min_keypoint_confidence,
-    )
+    torso_tilt_change = metric_by_name[SwingMetricName.TORSO_TILT_PRESERVATION]
     attack_value = attack.value if attack.value is not None else -math.inf
-    if attack_value > config.excessive_attack_angle_degrees or _ratio_exceeds(
-        torso_tilt_change, config.torso_tilt_change_warning_degrees
-    ):
+    if attack_value > config.excessive_attack_angle_degrees or _is_problem(torso_tilt_change):
         faults.append(
             SwingFaultResult(
                 fault_type=SwingFaultType.EXCESSIVE_UPPER_SWING_EARLY_EXTENSION,
                 phase=SwingPhase.IMPACT,
-                severity=_fault_severity(attack),
-                confidence=max(attack.confidence, _ratio_confidence(torso_tilt_change)),
+                severity=_max_severity(attack, torso_tilt_change),
+                confidence=max(attack.confidence, torso_tilt_change.confidence),
                 evidence="Attack angle or trunk posture suggests an excessive upward path.",
-                evidence_frames=attack.evidence_frames,
+                evidence_frames=_combined_evidence_frames(attack, torso_tilt_change),
             )
         )
 
@@ -475,6 +649,7 @@ def _detect_faults(
         sides.lead,
         sides.rear,
         config.min_keypoint_confidence,
+        measurement_space,
     )
     if _is_problem(lead_knee) or _ratio_exceeds(
         lead_knee_drift,
@@ -558,14 +733,23 @@ def _aggregate_confidence(
 
 def _good_points(metrics: Sequence[SwingMetricResult]) -> tuple[str, ...]:
     messages = {
-        SwingMetricName.SHIN_TORSO_PARALLELISM: "Setup posture maintained shin-torso alignment.",
+        SwingMetricName.NORMALIZED_STANCE_WIDTH: "Setup stance width matched the v2 baseline.",
+        SwingMetricName.TORSO_FORWARD_TILT: "Setup torso forward tilt matched the v2 baseline.",
+        SwingMetricName.TORSO_TILT_PRESERVATION: (
+            "Torso forward tilt was preserved from setup to impact."
+        ),
+        SwingMetricName.GRIP_LOADING_VECTOR: "Grip loading stayed near the rear-side baseline.",
+        SwingMetricName.REAR_KNEE_SWAY: "Rear knee sway stayed controlled during stride.",
+        SwingMetricName.HEAD_TRANSLATION_RATIO: "Head movement stayed controlled through impact.",
         SwingMetricName.EARLY_CONNECTION_ANGLE: "Lead arm connection stayed in the target range.",
         SwingMetricName.LEAD_KNEE_BLOCKING_INDEX: (
             "Lead knee braced or extended from foot strike to impact."
         ),
-        SwingMetricName.HEAD_TRANSLATION_RATIO: "Head movement stayed controlled through impact.",
-        SwingMetricName.ESTIMATED_ATTACK_ANGLE: "Attack angle stayed near the target range.",
         SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: "Pelvis rotation led shoulder rotation.",
+        SwingMetricName.ESTIMATED_ATTACK_ANGLE: "Attack angle stayed near the target range.",
+        SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE: (
+            "Follow-through posture and head position stayed controlled."
+        ),
     }
     return tuple(
         messages[metric.name] for metric in metrics if metric.severity == SwingSeverity.GOOD
@@ -639,6 +823,19 @@ def _fault_severity(metric: SwingMetricResult) -> SwingSeverity:
     return SwingSeverity.WARNING
 
 
+def _max_severity(*metrics: SwingMetricResult) -> SwingSeverity:
+    if any(metric.severity == SwingSeverity.SEVERE for metric in metrics):
+        return SwingSeverity.SEVERE
+    return SwingSeverity.WARNING
+
+
+def _combined_evidence_frames(*metrics: SwingMetricResult) -> tuple[int, ...]:
+    frames: list[int] = []
+    for metric in metrics:
+        frames.extend(metric.evidence_frames)
+    return tuple(dict.fromkeys(frames))
+
+
 def _require_value(metric: SwingMetricValue) -> float:
     if metric.value is None:
         raise ValueError(f"{metric.name.value} is missing a value.")
@@ -657,16 +854,21 @@ def _wrist_chest_distance_ratio(
     frame: PoseFrame,
     lead_side: BodySide,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[float, float] | None:
     wrist = frame.get(side_keypoint(lead_side, "wrist"), min_confidence=min_confidence)
     chest = _midpoint(
         frame.get(PoseKeypointName.LEFT_SHOULDER, min_confidence=min_confidence),
         frame.get(PoseKeypointName.RIGHT_SHOULDER, min_confidence=min_confidence),
     )
-    scale = torso_length(frame, min_confidence=min_confidence)
+    scale = torso_length(
+        frame,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
     if wrist is None or chest is None or scale is None:
         return None
-    ratio = abs(wrist.point.x - chest.point.x) / scale
+    ratio = measurement_space.horizontal_distance(wrist.point, chest.point) / scale
     return ratio, min(wrist.confidence, chest.confidence)
 
 
@@ -676,6 +878,7 @@ def _rear_knee_sway_ratio(
     rear_side: BodySide,
     lead_side: BodySide,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[float, float] | None:
     setup_rear_ankle = setup.get(
         side_keypoint(rear_side, "ankle"),
@@ -689,7 +892,11 @@ def _rear_knee_sway_ratio(
         side_keypoint(rear_side, "knee"),
         min_confidence=min_confidence,
     )
-    scale = torso_length(setup, min_confidence=min_confidence)
+    scale = torso_length(
+        setup,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
     if (
         setup_rear_ankle is None
         or setup_lead_ankle is None
@@ -698,7 +905,10 @@ def _rear_knee_sway_ratio(
     ):
         return None
     forward_sign = 1.0 if setup_lead_ankle.point.x >= setup_rear_ankle.point.x else -1.0
-    outward_distance = -forward_sign * (stride_rear_knee.point.x - setup_rear_ankle.point.x)
+    outward_distance = -forward_sign * measurement_space.horizontal_delta(
+        setup_rear_ankle.point,
+        stride_rear_knee.point,
+    )
     return max(0.0, outward_distance / scale), min(
         setup_rear_ankle.confidence,
         setup_lead_ankle.confidence,
@@ -712,6 +922,7 @@ def _lead_knee_forward_drift_ratio(
     lead_side: BodySide,
     rear_side: BodySide,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[float, float] | None:
     foot_lead_ankle = foot_strike.get(
         side_keypoint(lead_side, "ankle"),
@@ -725,7 +936,11 @@ def _lead_knee_forward_drift_ratio(
         side_keypoint(lead_side, "knee"),
         min_confidence=min_confidence,
     )
-    scale = torso_length(foot_strike, min_confidence=min_confidence)
+    scale = torso_length(
+        foot_strike,
+        min_confidence=min_confidence,
+        measurement_space=measurement_space,
+    )
     if (
         foot_lead_ankle is None
         or foot_rear_ankle is None
@@ -734,7 +949,10 @@ def _lead_knee_forward_drift_ratio(
     ):
         return None
     forward_sign = 1.0 if foot_lead_ankle.point.x >= foot_rear_ankle.point.x else -1.0
-    forward_distance = forward_sign * (impact_lead_knee.point.x - foot_lead_ankle.point.x)
+    forward_distance = forward_sign * measurement_space.horizontal_delta(
+        foot_lead_ankle.point,
+        impact_lead_knee.point,
+    )
     return max(0.0, forward_distance / scale), min(
         foot_lead_ankle.confidence,
         foot_rear_ankle.confidence,
@@ -746,6 +964,7 @@ def _torso_tilt_change(
     setup: PoseFrame,
     impact: PoseFrame,
     min_confidence: float,
+    measurement_space: SwingMeasurementSpace,
 ) -> tuple[float, float] | None:
     setup_hip = _midpoint(
         setup.get(PoseKeypointName.LEFT_HIP, min_confidence=min_confidence),
@@ -765,8 +984,8 @@ def _torso_tilt_change(
     )
     if setup_hip is None or setup_shoulder is None or impact_hip is None or impact_shoulder is None:
         return None
-    setup_angle = vector_angle_degrees(setup_hip.point, setup_shoulder.point)
-    impact_angle = vector_angle_degrees(impact_hip.point, impact_shoulder.point)
+    setup_angle = measurement_space.vector_angle_degrees(setup_hip.point, setup_shoulder.point)
+    impact_angle = measurement_space.vector_angle_degrees(impact_hip.point, impact_shoulder.point)
     return angle_difference_degrees(setup_angle, impact_angle), min(
         setup_hip.confidence,
         setup_shoulder.confidence,

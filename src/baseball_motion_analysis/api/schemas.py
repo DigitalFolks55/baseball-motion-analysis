@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from baseball_motion_analysis.analysis import SwingAnalysisResult
 from baseball_motion_analysis.app.swing_services import (
     AnalyzeSwingVideoResponse,
+    EvaluationOverlayLine,
     PoseOverlayFrame,
     SwingEventWindow,
     SwingVideoSamplingDiagnostics,
@@ -138,6 +139,8 @@ class SwingAnalysisRequestPayload(BaseModel):
     frames: list[PoseFramePayload]
     handedness: str = "unknown"
     phase_frames: dict[str, int] | None = None
+    frame_width: int | None = None
+    frame_height: int | None = None
 
 
 class SwingPhaseFramesResponse(BaseModel):
@@ -187,6 +190,7 @@ class SwingMetricResultResponse(BaseModel):
     value: float | None
     target_min: float | None
     target_max: float | None
+    unit: str
     severity: str
     confidence: float
     evidence_frames: tuple[int, ...]
@@ -209,6 +213,7 @@ class SwingFaultResultResponse(BaseModel):
 class SwingAnalysisResultResponse(BaseModel):
     """Browser-safe swing analysis response."""
 
+    methodology_version: str
     overall_score: float
     phase_scores: tuple[SwingPhaseScoreResponse, ...]
     metrics: tuple[SwingMetricResultResponse, ...]
@@ -224,6 +229,7 @@ class SwingAnalysisResultResponse(BaseModel):
     def from_result(cls, result: SwingAnalysisResult) -> SwingAnalysisResultResponse:
         """Create a public response from an analysis result."""
         return cls(
+            methodology_version=result.methodology_version,
             overall_score=result.overall_score,
             phase_scores=tuple(
                 SwingPhaseScoreResponse(
@@ -240,6 +246,7 @@ class SwingAnalysisResultResponse(BaseModel):
                     value=metric.value,
                     target_min=metric.target_min,
                     target_max=metric.target_max,
+                    unit=metric.unit,
                     severity=metric.severity.value,
                     confidence=metric.confidence,
                     evidence_frames=metric.evidence_frames,
@@ -484,6 +491,51 @@ class PoseOverlayFrameResponse(BaseModel):
         )
 
 
+class EvaluationOverlayPointResponse(BaseModel):
+    """Browser-safe normalized point for an evaluation overlay line."""
+
+    x: float
+    y: float
+
+
+class EvaluationOverlayLineResponse(BaseModel):
+    """Browser-safe swing evaluation overlay line response."""
+
+    metric_name: str
+    phase: str
+    frame_index: int
+    start_keypoint_name: str | None
+    end_keypoint_name: str | None
+    start: EvaluationOverlayPointResponse
+    end: EvaluationOverlayPointResponse
+    label: str
+    severity: str
+    confidence: float
+    style: Literal["solid", "dashed", "reference"]
+    color_role: Literal["good", "warning", "severe", "neutral", "low_confidence"]
+
+    @classmethod
+    def from_overlay_line(
+        cls,
+        line: EvaluationOverlayLine,
+    ) -> EvaluationOverlayLineResponse:
+        """Create a public response from evaluation overlay line data."""
+        return cls(
+            metric_name=line.metric_name,
+            phase=line.phase,
+            frame_index=line.frame_index,
+            start_keypoint_name=line.start_keypoint_name,
+            end_keypoint_name=line.end_keypoint_name,
+            start=EvaluationOverlayPointResponse(x=line.start.x, y=line.start.y),
+            end=EvaluationOverlayPointResponse(x=line.end.x, y=line.end.y),
+            label=line.label,
+            severity=line.severity,
+            confidence=line.confidence,
+            style=line.style,
+            color_role=line.color_role,
+        )
+
+
 class PoseDebugDiagnosticsResponse(BaseModel):
     """Browser-safe pose debug diagnostics."""
 
@@ -521,6 +573,7 @@ class SwingVideoAnalysisResponse(BaseModel):
     events: tuple[SwingEventResponse, ...]
     overlay: tuple[PoseOverlayFrameResponse, ...]
     raw_overlay: tuple[PoseOverlayFrameResponse, ...]
+    evaluation_overlay: tuple[EvaluationOverlayLineResponse, ...]
     limitations: tuple[str, ...]
     pose_cache_hit: bool
     pose_diagnostics: PoseQualityDiagnosticsResponse | None
@@ -546,6 +599,10 @@ class SwingVideoAnalysisResponse(BaseModel):
             raw_overlay=tuple(
                 PoseOverlayFrameResponse.from_overlay_frame(frame)
                 for frame in response.raw_overlay_frames
+            ),
+            evaluation_overlay=tuple(
+                EvaluationOverlayLineResponse.from_overlay_line(line)
+                for line in response.evaluation_overlay
             ),
             limitations=response.limitations,
             pose_cache_hit=response.pose_cache_hit,

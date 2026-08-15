@@ -1,11 +1,12 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from baseball_motion_analysis.app.main import create_app
 from baseball_motion_analysis.core.config import AppSettings
 from baseball_motion_analysis.pose import PoseFrame
-from unit.swing_test_helpers import GOOD_PHASES, good_swing_frames
+from unit.swing_test_helpers import GOOD_PHASES, aspect_sensitive_swing_frames, good_swing_frames
 
 
 def test_swing_analysis_api_returns_analysis_and_feedback(tmp_path: Path) -> None:
@@ -15,16 +16,45 @@ def test_swing_analysis_api_returns_analysis_and_feedback(tmp_path: Path) -> Non
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["analysis"]["methodology_version"] == "swing_evaluation_v2"
     assert payload["analysis"]["overall_score"] > 90.0
     assert payload["analysis"]["handedness"] == "right_handed"
     assert payload["analysis"]["phase_scores"]
     assert payload["analysis"]["metrics"]
+    assert any(
+        metric["name"] == "normalized_stance_width" and metric["unit"] == "torso_lengths"
+        for metric in payload["analysis"]["metrics"]
+    )
     assert "setup" in payload["analysis"]["phases"]
     assert payload["feedback"]["summary"]
     assert payload["feedback"]["good_points"]
     assert payload["feedback"]["improvement_points"]
     assert payload["feedback"]["drills_or_suggestions"]
     assert payload["feedback"]["limitations"]
+    assert str(tmp_path) not in response.text
+
+
+def test_swing_analysis_api_accepts_frame_dimensions_for_aspect_aware_metrics(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(_create_test_app(tmp_path))
+
+    response = client.post("/api/v1/analysis/swing", json=_aspect_sensitive_payload())
+
+    assert response.status_code == 200
+    payload = response.json()
+    stance = next(
+        metric
+        for metric in payload["analysis"]["metrics"]
+        if metric["name"] == "normalized_stance_width"
+    )
+    torso_tilt = next(
+        metric
+        for metric in payload["analysis"]["metrics"]
+        if metric["name"] == "torso_forward_tilt"
+    )
+    assert stance["value"] == pytest.approx(1.0264)
+    assert torso_tilt["value"] == pytest.approx(30.0)
     assert str(tmp_path) not in response.text
 
 
@@ -99,6 +129,16 @@ def _good_swing_payload() -> dict[str, object]:
         "frames": [_pose_frame_to_payload(frame) for frame in good_swing_frames()],
         "handedness": "right_handed",
         "phase_frames": {phase.value: frame_index for phase, frame_index in GOOD_PHASES.items()},
+    }
+
+
+def _aspect_sensitive_payload() -> dict[str, object]:
+    return {
+        "frames": [_pose_frame_to_payload(frame) for frame in aspect_sensitive_swing_frames()],
+        "handedness": "right_handed",
+        "phase_frames": {phase.value: frame_index for phase, frame_index in GOOD_PHASES.items()},
+        "frame_width": 1920,
+        "frame_height": 1080,
     }
 
 

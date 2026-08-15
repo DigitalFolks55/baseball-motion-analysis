@@ -18,10 +18,19 @@ def test_analyze_swing_scores_good_sequence_highly() -> None:
         phase_frames=GOOD_PHASES,
     )
 
+    assert result.methodology_version == "swing_evaluation_v2"
     assert result.overall_score == pytest.approx(100.0)
     assert not result.detected_faults
     assert result.confidence == pytest.approx(1.0)
-    assert "Attack angle stayed near the target range." in result.good_points
+    assert "Setup stance width matched the v2 baseline." in result.good_points
+    stance_metric = next(
+        metric
+        for metric in result.metrics
+        if metric.name == SwingMetricName.NORMALIZED_STANCE_WIDTH
+    )
+    assert stance_metric.target_min == pytest.approx(1.0)
+    assert stance_metric.target_max == pytest.approx(1.2)
+    assert stance_metric.severity == SwingSeverity.GOOD
 
 
 @pytest.mark.parametrize(
@@ -59,6 +68,7 @@ def test_metric_deductions_expose_largest_improvement_priority() -> None:
         metric for metric in result.metrics if metric.name == SwingMetricName.ESTIMATED_ATTACK_ANGLE
     )
 
+    assert result.methodology_version == "swing_evaluation_v2"
     assert attack_metric.severity in {SwingSeverity.WARNING, SwingSeverity.SEVERE}
     assert attack_metric.deduction > 0.0
     assert "Excessive Upper Swing / Early Extension" in result.improvement_priorities

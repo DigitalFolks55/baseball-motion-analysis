@@ -38,6 +38,21 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert '<option value="notebook_parity">Single pose</option>' in page.text
     assert "Overlay Source" in page.text
     assert "Score Confidence" in page.text
+    assert "Methodology" in page.text
+    assert "<th>Unit</th>" in page.text
+    assert "Poses" in page.text
+    assert "Evaluation Lines" in page.text
+    assert "Metric" in page.text
+    assert 'id="evaluationMetricControl"' in page.text
+    assert 'id="evaluationMetricToggle"' in page.text
+    assert 'aria-haspopup="true"' in page.text
+    assert 'aria-expanded="false"' in page.text
+    assert 'id="evaluationMetricMenu"' in page.text
+    assert "multiple size=" not in page.text
+    assert page.text.index("poseOverlayToggle") < page.text.index("evaluationLinesToggle")
+    assert page.text.index("evaluationLinesToggle") < page.text.index("evaluationMetricControl")
+    assert page.text.index("evaluationMetricControl") < page.text.index("playbackRate")
+    assert 'aria-pressed="false"' in page.text
     assert "Diagnostics" in page.text
     assert "Pose Quality" in page.text
     assert '<details id="analysisDiagnostics"' in page.text
@@ -58,12 +73,32 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "pose_mode: swingPoseMode.value" in script.text
     assert "overlay_source" in script.text
     assert "analysisRawOverlayFrames" in script.text
+    assert "analysisEvaluationOverlay" in script.text
+    assert "evaluation_overlay" in script.text
+    assert "poseOverlayToggle" in script.text
+    assert "evaluationMetricToggle" in script.text
+    assert "evaluationMetricMenu" in script.text
+    assert "poseOverlayEnabled = !poseOverlayEnabled" in script.text
+    assert "updatePoseOverlayToggle" in script.text
+    assert "updateEvaluationLinesToggle" in script.text
+    assert "updateEvaluationMetricSelect" in script.text
+    assert "syncEvaluationMetricSelectSelection" in script.text
+    assert "selectedEvaluationMetrics" in script.text
+    assert "drawEvaluationOverlayLines" in script.text
+    assert "evaluationLinesForFrame" in script.text
+    assert "evaluationLinesEnabled = !evaluationLinesEnabled" in script.text
+    assert "drawSkeletonLines(context, keypoints, contentRect)" in script.text
+    assert "drawKeypoint(context, keypoint, contentRect, frame.is_event_frame)" in script.text
+    assert "drawKeypointLabel" not in script.text
+    assert "videoPlayer.playbackRate = Number(playbackRate.value)" in script.text
+    assert 'Overlay active: ${activeModes.join(" + ")} aligned to replay.' in script.text
     assert "offset ${offsetMs} ms" in script.text
     assert "Single Pose" in script.text
     assert "Event confidence" in script.text
     assert "renderPoseQuality" in script.text
     assert "videoContentRect" in script.text
     assert "renderSwingVideoAnalysis" in script.text
+    assert "swingMethodology" in script.text
     assert "clearAnalysis({ status" in script.text
     assert "drawPoseOverlay" in script.text
     assert 'videoPlayer.addEventListener("timeupdate"' in script.text
@@ -81,6 +116,117 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert '"analysis analysis"' in styles.text
     assert "lower-workspace" not in page.text
     assert "pose-overlay" in styles.text
+    assert "replay-toolbar" in styles.text
+    assert "pose-overlay-toggle" in styles.text
+    assert "evaluation-lines-toggle" in styles.text
+    assert "toolbar-field" in styles.text
+    assert "metric-control" in styles.text
+    assert "metric-dropdown-toggle" in styles.text
+    assert "metric-dropdown-menu" in styles.text
+    assert "metric-dropdown-item" in styles.text
+    assert "min-height: 2.25rem" in styles.text
+    assert "evidence-cell" in styles.text
+    assert "table-cell-content" in styles.text
+    assert "metrics-table" in styles.text
+    assert "metrics-evidence-column" in styles.text
+    assert "width: 7.5rem" in styles.text
+    assert "max-height: 4.75rem" in styles.text
+    assert "fault-evidence" in styles.text
+    assert "metrics-evidence" in styles.text
+    assert "max-height: min(42vh, 32rem)" in styles.text
+    assert "overflow-y: auto" in styles.text
+    assert "overflow-x: hidden" in styles.text
+
+
+def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None:
+    client = TestClient(_create_test_app(tmp_path))
+
+    page = client.get("/")
+    script = client.get("/static/app.js")
+
+    assert page.status_code == 200
+    assert script.status_code == 200
+    assert page.text.index("poseOverlayToggle") < page.text.index("evaluationLinesToggle")
+    assert page.text.index("evaluationLinesToggle") < page.text.index("evaluationMetricControl")
+    assert page.text.index("evaluationMetricControl") < page.text.index("playbackRate")
+
+    assert 'const allEvaluationMetricsValue = "__all__";' in script.text
+    assert "const selectedEvaluationMetrics = new Set();" in script.text
+    assert 'label: "All metrics"' in script.text
+    assert "evaluationMetricLabels" in script.text
+    assert 'normalized_stance_width: "Stance width"' in script.text
+    assert 'torso_tilt_preservation: "Tilt hold"' in script.text
+    assert 'hip_shoulder_separation_timing: "Hip/shoulder timing"' in script.text
+    assert 'follow_through_posture_balance: "Follow-through"' in script.text
+    assert "evaluationMetricNames()" in script.text
+    assert "seenMetricNames.has(line.metric_name)" in script.text
+    assert "value: metricName" in script.text
+    assert "label: formatEvaluationMetricLabel(metricName)" in script.text
+    assert "evaluationMetricToggle.disabled = metricNames.length === 0" in script.text
+    assert "selectedEvaluationMetrics.clear()" in script.text
+    assert "syncEvaluationMetricSelectSelection()" in script.text
+    assert "evaluationMetricMenuItem" in script.text
+    assert 'checkbox.type = "checkbox"' in script.text
+
+    assert "return selectedEvaluationLines().filter(" in script.text
+    all_metric_branch = "if (selectedEvaluationMetrics.size === 0) return analysisEvaluationOverlay"
+    assert all_metric_branch in script.text
+    assert "selectedEvaluationMetrics.has(line.metric_name)" in script.text
+    assert "if (evaluationLinesEnabled) {" in script.text
+    assert "drawEvaluationOverlayLines(context, frame, contentRect)" in script.text
+    assert "return `${selectedEvaluationMetrics.size} metric groups`;" in script.text
+
+    listener_start = script.text.index('evaluationMetricMenu.addEventListener("change"')
+    listener_body = script.text[listener_start : listener_start + 260]
+    assert "syncSelectedEvaluationMetricsFromMenu(event.target);" in listener_body
+    assert "drawPoseOverlay();" in listener_body
+    sync_function = "function syncSelectedEvaluationMetricsFromMenu(changedCheckbox)"
+    sync_start = script.text.index(sync_function)
+    sync_body = script.text[sync_start : sync_start + 520]
+    assert "changedCheckbox.value === allEvaluationMetricsValue" in sync_body
+    assert "selectedEvaluationMetrics.add(changedCheckbox.value)" in sync_body
+    assert "selectedEvaluationMetrics.delete(changedCheckbox.value)" in sync_body
+    assert "syncEvaluationMetricSelectSelection();" in sync_body
+    assert "fetch(" not in listener_body
+    assert "playbackRate" not in listener_body
+    assert "clearAnalysis" not in listener_body
+    assert 'evaluationMetricToggle.addEventListener("click"' in script.text
+    assert 'document.addEventListener("keydown"' in script.text
+
+
+def test_web_ui_evidence_cells_are_bounded_and_scrollable(tmp_path: Path) -> None:
+    client = TestClient(_create_test_app(tmp_path))
+
+    script = client.get("/static/app.js")
+    styles = client.get("/static/styles.css")
+
+    assert script.status_code == 200
+    assert styles.status_code == 200
+    assert "metrics-evidence-column" in script.text
+    metrics_evidence_call = (
+        'appendScrollableCell(\n      row,\n      (metric.evidence_frames ?? []).join(", ")'
+    )
+    assert metrics_evidence_call in script.text
+    evidence_class_assignment = (
+        "content.className = `table-cell-content evidence-cell ${contentClassName}`;"
+    )
+    assert evidence_class_assignment in script.text
+    assert 'content.className = "table-cell-content";' in script.text
+    assert "if (String(value).length > 32) content.tabIndex = 0" in script.text
+    assert "content.tabIndex = 0" in script.text
+    assert 'evidence.className = "evidence-cell fault-evidence"' in script.text
+    assert "evidence.tabIndex = 0" in script.text
+    assert ".evidence-cell" in styles.text
+    assert ".table-cell-content" in styles.text
+    assert ".metrics-table" in styles.text
+    assert ".metrics-evidence-column" in styles.text
+    assert "width: 7.5rem" in styles.text
+    assert "max-width: 6.75rem" in styles.text
+    assert "max-height: 4.75rem" in styles.text
+    assert "overflow-y: auto" in styles.text
+    assert "overflow-x: hidden" in styles.text
+    assert "overflow-wrap: anywhere" in styles.text
+    assert "overscroll-behavior: contain" in styles.text
 
 
 def test_upload_library_replay_manifest_and_content_range(tmp_path: Path) -> None:
