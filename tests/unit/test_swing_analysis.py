@@ -22,7 +22,7 @@ def test_analyze_swing_scores_good_sequence_highly() -> None:
     assert result.overall_score == pytest.approx(100.0)
     assert not result.detected_faults
     assert result.confidence == pytest.approx(1.0)
-    assert "Setup stance width matched the v2 baseline." in result.good_points
+    assert "Setup stance width matched the baseline." in result.good_points
     stance_metric = next(
         metric
         for metric in result.metrics
