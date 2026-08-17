@@ -18,6 +18,12 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
 
     assert page.status_code == 200
     assert "Baseball Motion Video Review" in page.text
+    assert 'id="languageSelect"' in page.text
+    assert "English" in page.text
+    assert "日本語" in page.text
+    assert 'data-i18n="language.label"' in page.text
+    assert 'data-i18n="upload.title"' in page.text
+    assert 'data-i18n="result.feedback"' in page.text
     assert "Local" in page.text
     assert "Upload Video" in page.text
     assert "Video Library" in page.text
@@ -35,11 +41,14 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "Advanced Pose Debug" in page.text
     assert "Single pose" in page.text
     assert "Notebook parity" not in page.text
-    assert '<option value="notebook_parity">Single pose</option>' in page.text
+    assert (
+        '<option value="notebook_parity" data-i18n="pose_mode.single_pose">Single pose</option>'
+        in page.text
+    )
     assert "Overlay Source" in page.text
     assert "Score Confidence" in page.text
     assert "Methodology" in page.text
-    assert "<th>Unit</th>" in page.text
+    assert 'data-i18n="table.unit">Unit</th>' in page.text
     assert "Poses" in page.text
     assert "Evaluation Lines" in page.text
     assert "Metric" in page.text
@@ -91,10 +100,17 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "drawKeypoint(context, keypoint, contentRect, frame.is_event_frame)" in script.text
     assert "drawKeypointLabel" not in script.text
     assert "videoPlayer.playbackRate = Number(playbackRate.value)" in script.text
-    assert 'Overlay active: ${activeModes.join(" + ")} aligned to replay.' in script.text
-    assert "offset ${offsetMs} ms" in script.text
+    assert '"overlay.active": "Overlay active: {modes} aligned to replay."' in script.text
+    assert '"overlay.offset": ", offset {offsetMs} ms"' in script.text
     assert "Single Pose" in script.text
     assert "Event confidence" in script.text
+    assert "languageStorageKey" in script.text
+    assert "currentLanguage" in script.text
+    assert "applyLanguage()" in script.text
+    assert "lastSwingAnalysisResult" in script.text
+    assert "localizedSwingSummary" in script.text
+    assert "localizedImprovementPoints" in script.text
+    assert "localStorage.setItem(languageStorageKey, currentLanguage)" in script.text
     assert "renderPoseQuality" in script.text
     assert "videoContentRect" in script.text
     assert "renderSwingVideoAnalysis" in script.text
@@ -124,6 +140,7 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "metric-dropdown-toggle" in styles.text
     assert "metric-dropdown-menu" in styles.text
     assert "metric-dropdown-item" in styles.text
+    assert "language-control" in styles.text
     assert "min-height: 2.25rem" in styles.text
     assert "evidence-cell" in styles.text
     assert "table-cell-content" in styles.text
@@ -152,9 +169,10 @@ def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None
 
     assert 'const allEvaluationMetricsValue = "__all__";' in script.text
     assert "const selectedEvaluationMetrics = new Set();" in script.text
-    assert 'label: "All metrics"' in script.text
-    assert "evaluationMetricLabels" in script.text
+    assert 'label: t("overlay.all_metrics")' in script.text
+    assert "localizedLabels" in script.text
     assert 'normalized_stance_width: "Stance width"' in script.text
+    assert 'normalized_stance_width: "スタンス幅"' in script.text
     assert 'torso_tilt_preservation: "Tilt hold"' in script.text
     assert 'hip_shoulder_separation_timing: "Hip/shoulder timing"' in script.text
     assert 'follow_through_posture_balance: "Follow-through"' in script.text
@@ -174,7 +192,10 @@ def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None
     assert "selectedEvaluationMetrics.has(line.metric_name)" in script.text
     assert "if (evaluationLinesEnabled) {" in script.text
     assert "drawEvaluationOverlayLines(context, frame, contentRect)" in script.text
-    assert "return `${selectedEvaluationMetrics.size} metric groups`;" in script.text
+    assert (
+        'return t("overlay.metric_groups_mode", { count: selectedEvaluationMetrics.size });'
+        in script.text
+    )
 
     listener_start = script.text.index('evaluationMetricMenu.addEventListener("change"')
     listener_body = script.text[listener_start : listener_start + 260]
@@ -192,6 +213,39 @@ def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None
     assert "clearAnalysis" not in listener_body
     assert 'evaluationMetricToggle.addEventListener("click"' in script.text
     assert 'document.addEventListener("keydown"' in script.text
+
+
+def test_web_ui_japanese_localization_static_behavior(tmp_path: Path) -> None:
+    client = TestClient(_create_test_app(tmp_path))
+
+    page = client.get("/")
+    script = client.get("/static/app.js")
+
+    assert page.status_code == 200
+    assert script.status_code == 200
+    assert '<select id="languageSelect" autocomplete="off">' in page.text
+    assert '<option value="en" selected>English</option>' in page.text
+    assert '<option value="ja">日本語</option>' in page.text
+    assert "野球動作ビデオレビュー" in script.text
+    assert "動画アップロード" in script.text
+    assert "スイング分析を実行" in script.text
+    assert "表示フレームに基づく v2 少年野球ベースライン評価" in script.text
+    assert "良い点" in script.text
+    assert "改善ポイント" in script.text
+    assert "スタンス幅" in script.text
+    assert "構え" in script.text
+    assert "ドアスイング / キャスティング" in script.text
+    assert "胸の前で腕を組む回転ドリル" in script.text
+    assert 'languageSelect?.addEventListener("change"' in script.text
+    assert "renderSwingVideoAnalysis(lastSwingAnalysisResult)" in script.text
+    assert "localizedLabels[currentLanguage]" in script.text
+
+    listener_start = script.text.index('languageSelect?.addEventListener("change"')
+    listener_body = script.text[listener_start : listener_start + 260]
+    assert "localStorage.setItem(languageStorageKey, currentLanguage)" in listener_body
+    assert "applyLanguage();" in listener_body
+    assert "fetch(" not in listener_body
+    assert "runSwingAnalysisButton" not in listener_body
 
 
 def test_web_ui_evidence_cells_are_bounded_and_scrollable(tmp_path: Path) -> None:
