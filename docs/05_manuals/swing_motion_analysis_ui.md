@@ -11,6 +11,17 @@ service and does not persist analysis reports yet.
 Swing results use `swing_evaluation_v2`, the current youth baseball 2D side-view
 baseline methodology.
 
+## Language
+
+English is the default UI language.
+
+Use the header language selector to switch between `English` and `日本語` in the same
+browser UI. The selected language changes visible UI labels, status messages, replay
+overlay text, and displayed swing-analysis result text without rerunning analysis.
+
+The language selector is presentation-only. It does not change media storage, pose
+estimation, swing scoring, analysis thresholds, or API/service behavior.
+
 ## Page Layout
 
 On desktop, the page is organized as:

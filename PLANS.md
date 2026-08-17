@@ -28,6 +28,10 @@ Use a local-PC-first, service-oriented architecture.
 
 Application services should support local UI workflows for upload/import, local storage, replay, motion analysis, scoring, and feedback report generation. The analysis core must not depend on the UI. Future web or mobile adapters can call the same application services or equivalent service interfaces.
 
+English is the default UI language. Japanese UI support is implemented through
+localization/i18n in the same UI, with user-facing strings isolated from domain logic,
+analysis rules, storage, and application services.
+
 ## Agent Workflow
 
 ```text
@@ -1219,6 +1223,52 @@ Final-review-planning result:
   pass on representative desktop and mobile viewport sizes is still useful before a
   broader release.
 
+DEV005-01 Japanese UI version planning scope:
+
+* Keep English as the default UI language.
+* Add a later language selector, for example `English / 日本語`, that enables switching
+  languages in the same UI.
+* Add Japanese UI and analysis-result text through localization/i18n rather than a
+  separate Japanese-only application.
+* Keep user-facing UI strings isolated so future translation is straightforward.
+* Keep domain logic, analysis rules, storage, video, pose, feedback data structures, and
+  application services language-independent.
+
+DEV005-01 non-goals:
+
+* Separate Japanese-only app, duplicated domain/service code, language-specific scoring,
+  hosted translation service integration, release, deployment, or packaging work.
+
+DEV005-01 acceptance criteria:
+
+* English remains the default language.
+* The UI exposes a visible language selector such as `English / 日本語`.
+* Switching language changes user-facing UI text without rerunning analysis.
+* Japanese analysis-result text renders from structured results or localized feedback
+  templates.
+* Tests cover language selection behavior and confirm core analysis output is not tied
+  to UI language.
+
+DEV005-01 final-review-planning result:
+
+* The local browser UI keeps English as the default language and exposes a header
+  `English / 日本語` selector.
+* Browser-side localization dictionaries render static UI labels, status messages,
+  overlay copy, metric labels, events, faults, known feedback templates, drills, and
+  common limitations in English or Japanese.
+* The last structured swing-analysis response is retained in browser state so changing
+  language re-renders visible result text without calling the analysis endpoint again.
+* Domain logic, analysis rules, storage, video handling, pose estimation, application
+  services, and API schemas remain language-independent.
+* Product, architecture, manual, development-log, and planning docs are updated.
+* Required quality commands passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* No release or deployment was created.
+
 ### Milestone 8: Release Preparation
 
 Status: IN_PROGRESS
@@ -1324,6 +1374,10 @@ Acceptance criteria:
 | T-0075 | Implement compact swing v2 metric dropdown | coding | DONE | Added compact metric dropdown menu and narrower evidence column |
 | T-0076 | QA compact swing v2 metric dropdown | quality-assurance | DONE | Static UI/JS tests updated; JS, ruff, format, mypy, and pytest checks pass |
 | T-0077 | Final review compact swing v2 metric dropdown | final-review-planning | DONE | Acceptance criteria verified; no release/deployment |
+| T-0078 | Plan Japanese UI localization | planning | DONE | DEV005-01 scope and acceptance criteria documented |
+| T-0079 | Implement Japanese UI localization | coding | DONE | Added `English / 日本語` selector and localized UI/result text |
+| T-0080 | QA Japanese UI localization | quality-assurance | DONE | Static UI/JS tests cover selector, localized strings, and no-rerun language switching |
+| T-0081 | Final review Japanese UI localization | final-review-planning | DONE | DEV005-01 acceptance criteria verified; no release/deployment |
 
 ## Open Decisions
 

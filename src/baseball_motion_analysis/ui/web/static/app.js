@@ -1,6 +1,7 @@
 const apiBase = "/api/v1/media/videos";
 const swingVideoAnalysisApiBase = "/api/v1/analysis/swing/video";
 
+const languageSelect = document.querySelector("#languageSelect");
 const fileInput = document.querySelector("#videoFile");
 const dropZone = document.querySelector("#dropZone");
 const selectedName = document.querySelector("#selectedName");
@@ -42,6 +43,7 @@ const swingAnalysisSource = document.querySelector("#swingAnalysisSource");
 const swingAnalysisResults = document.querySelector("#swingAnalysisResults");
 const swingOverallScore = document.querySelector("#swingOverallScore");
 const swingConfidence = document.querySelector("#swingConfidence");
+const swingMethodology = document.querySelector("#swingMethodology");
 const swingSummary = document.querySelector("#swingSummary");
 const swingGoodPoints = document.querySelector("#swingGoodPoints");
 const swingImprovementPoints = document.querySelector("#swingImprovementPoints");
@@ -63,21 +65,493 @@ let analysisEvents = [];
 let analysisEvaluationOverlay = [];
 let poseOverlayEnabled = false;
 let evaluationLinesEnabled = false;
+let lastSwingAnalysisResult = null;
+let lastLibraryRecords = [];
+
+const languageStorageKey = "baseball_motion_analysis.ui_language";
+let currentLanguage = supportedLanguage(localStorage.getItem(languageStorageKey) ?? "en");
 
 const allEvaluationMetricsValue = "__all__";
 const selectedEvaluationMetrics = new Set();
-const evaluationMetricLabels = {
-  normalized_stance_width: "Stance width",
-  torso_forward_tilt: "Torso tilt",
-  torso_tilt_preservation: "Tilt hold",
-  grip_loading_vector: "Grip load",
-  rear_knee_sway: "Rear knee sway",
-  head_translation_ratio: "Head drift",
-  early_connection_angle: "Connection",
-  lead_knee_blocking_index: "Lead block",
-  hip_shoulder_separation_timing: "Hip/shoulder timing",
-  estimated_attack_angle: "Attack angle",
-  follow_through_posture_balance: "Follow-through",
+
+const translations = {
+  en: {
+    "app.subtitle": "Baseball Motion Video Review",
+    "language.label": "Language",
+    "upload.title": "Upload Video",
+    "upload.max": "Max {maxUploadMb} MB",
+    "upload.choose": "Choose a video or drop it here",
+    "upload.format_note": "MP4 and WebM are the most reliable browser replay formats.",
+    "upload.button": "Upload",
+    "library.title": "Video Library",
+    "library.refresh": "Refresh",
+    "replay.title": "Replay",
+    "replay.speed": "Speed",
+    "replay.previous_frame": "Previous Frame",
+    "replay.next_frame": "Next Frame",
+    "overlay.poses": "Poses",
+    "overlay.evaluation_lines": "Evaluation Lines",
+    "overlay.metric": "Metric",
+    "overlay.all_metrics": "All metrics",
+    "analysis.title": "Motion Analysis",
+    "analysis.video_driven": "Video-driven",
+    "analysis.motion_type": "Motion Type",
+    "analysis.motion_help":
+      "Swing is runnable now. Throwing, pitching, and fielding are planned analysis categories.",
+    "analysis.unsupported_motion":
+      "This motion type is planned but not implemented yet. Select Swing to run analysis.",
+    "analysis.selected_video": "Selected Video",
+    "analysis.pose": "Pose",
+    "analysis.pose_description":
+      "Detected locally from sampled video frames with MediaPipe body landmarks.",
+    "analysis.events": "Events",
+    "analysis.events_description":
+      "Setup, stride, foot strike, impact, and follow-through are selected automatically.",
+    "swing.title": "Swing Analysis",
+    "swing.note":
+      "Runs from the selected stored video. The app samples frames, tracks player body pose with MediaPipe, detects swing events, and scores the motion.",
+    "swing.handedness": "Handedness",
+    "swing.handedness_help":
+      "Right-handed uses the left side as lead side; left-handed uses the right side. Unknown lowers confidence because a default side interpretation is used.",
+    "swing.quality_mode": "Quality Mode",
+    "swing.quality_help":
+      "Higher accuracy samples more frames for fast swings. Faster mode reduces local runtime but can miss foot strike or estimated impact cues.",
+    "swing.advanced_pose_debug": "Advanced Pose Debug",
+    "swing.pose_mode": "Pose Mode",
+    "swing.pose_mode_help": "Single pose uses raw single-pose MediaPipe landmarks without temporal stabilization.",
+    "swing.overlay_source": "Overlay Source",
+    "swing.overlay_source_help": "Raw overlay helps compare detector output with the stabilized analysis pose.",
+    "swing.run": "Run Swing Analysis",
+    "swing.clear_analysis": "Clear Analysis",
+    "swing.run_help":
+      "Run samples the selected video, tracks MediaPipe body pose locally, detects swing events, and returns in-memory results. Clear removes results and overlays without deleting media.",
+    "result.overall": "Overall",
+    "result.confidence": "Confidence",
+    "result.confidence_help":
+      "Confidence reflects visible keypoint quality, handedness certainty, and phase detection certainty.",
+    "result.methodology": "Methodology",
+    "result.feedback": "Feedback",
+    "result.good_points": "Good Points",
+    "result.improvement_points": "Improvement Points",
+    "result.drills": "Drills",
+    "result.events_scores": "Detected Events And Phase Scores",
+    "result.metrics": "Metrics",
+    "result.detected_faults": "Detected Faults",
+    "result.diagnostics": "Diagnostics",
+    "result.limitations": "Limitations",
+    "result.limitations_help":
+      "Limitations identify sampling limits, missing keypoints, weak bat evidence, or 2D camera constraints.",
+    "result.pose_quality": "Pose Quality",
+    "table.phase": "Phase",
+    "table.score": "Score",
+    "table.weight": "Weight",
+    "table.score_confidence": "Score Confidence",
+    "table.metric": "Metric",
+    "table.value": "Value",
+    "table.unit": "Unit",
+    "table.target": "Target",
+    "table.severity": "Severity",
+    "table.deduction": "Deduction",
+    "table.evidence": "Evidence",
+    "common.clear": "Clear",
+    "common.selected": "Selected",
+    "common.size": "Size",
+    "common.title": "Title",
+    "common.time": "Time",
+    "common.resolution": "Resolution",
+    "common.none": "None",
+    "common.unknown": "Unknown",
+    "motion.swing": "Swing",
+    "motion.throwing": "Throwing",
+    "motion.pitching": "Pitching",
+    "motion.fielding": "Fielding",
+    "handedness.right_handed": "Right-handed",
+    "handedness.left_handed": "Left-handed",
+    "quality.higher_accuracy": "Higher accuracy",
+    "quality.balanced": "Balanced",
+    "quality.faster": "Faster",
+    "pose_mode.normal": "Normal",
+    "pose_mode.single_pose": "Single pose",
+    "overlay_source.stabilized": "Stabilized",
+    "overlay_source.raw": "Raw",
+    "status.waiting_video": "Waiting for a video.",
+    "status.ready_upload": "Ready to upload.",
+    "status.uploading": "Uploading and validating...",
+    "status.upload_complete": "Upload complete.",
+    "status.upload_failed": "Upload failed.",
+    "status.library_loading": "Loading library...",
+    "status.library_count": "{count} video(s) available.",
+    "status.library_empty": "No videos yet.",
+    "status.library_unavailable": "Library unavailable.",
+    "status.deleting": "Deleting video...",
+    "status.deleted": "Video deleted.",
+    "status.delete_failed": "Delete failed.",
+    "status.replay_loading": "Loading replay...",
+    "status.replay_unavailable": "Replay unavailable.",
+    "status.ready_analysis": "Ready to run swing analysis for the selected video.",
+    "status.select_analysis_video": "Select a stored video to run swing analysis.",
+    "status.select_replay_video": "Select a stored video to replay.",
+    "status.select_swing": "Select Swing to run analysis.",
+    "status.analysis_cleared": "Analysis cleared.",
+    "status.analysis_running": "Sampling frames and tracking MediaPipe body pose...",
+    "status.analysis_complete": "Swing analysis complete.",
+    "status.analysis_cache_complete": "Swing analysis complete. Pose cache reused.",
+    "status.analysis_failed": "Swing analysis failed.",
+    "status.no_video_selected": "No video selected",
+    "status.browser_supported": "Ready for browser playback.",
+    "status.browser_possibly_unsupported":
+      "Uploaded, but this container or codec may not play in every browser.",
+    "status.video_missing": "The stored video file is missing.",
+    "status.browser_unsupported": "This video format is not supported for browser replay.",
+    "status.video_error": "The browser could not play this video. Try MP4 or WebM with a browser-supported codec.",
+    "overlay.hidden_select": "Overlay hidden: select a stored video.",
+    "overlay.hidden_run": "Overlay hidden: run swing analysis to detect pose.",
+    "overlay.hidden_off": "Overlay hidden: poses and evaluation lines are off.",
+    "overlay.active": "Overlay active: {modes} aligned to replay.",
+    "overlay.showing": "{message} Showing {matchStatus} {source} pose frame {frameIndex}.",
+    "overlay.poses_mode": "poses",
+    "overlay.evaluation_lines_mode": "evaluation lines",
+    "overlay.metric_lines_mode": "{metricLabel} lines",
+    "overlay.metric_groups_mode": "{count} metric groups",
+    "overlay.interpolated": "interpolated{offset}",
+    "overlay.nearest_sampled": "nearest sampled{offset}",
+    "overlay.exact_sampled": "exact sampled",
+    "overlay.offset": ", offset {offsetMs} ms",
+    "result.summary":
+      "Based on the visible frames, the v2 youth baseline swing evaluation scored this swing {score}/100. The result confidence is {confidence}.",
+    "result.no_faults": "No detected faults.",
+    "result.event_row": "{label}: frame {frameIndex}, Event confidence {confidence}, {method}",
+    "result.fault_row": "{faultType} at {phase} ({severity}):",
+    "result.fault_evidence": "{evidence} Evidence frames: {frames}.",
+    "confirm.delete": "Delete \"{displayName}\" from the local media library?",
+  },
+  ja: {
+    "app.subtitle": "野球動作ビデオレビュー",
+    "language.label": "言語",
+    "upload.title": "動画アップロード",
+    "upload.max": "最大 {maxUploadMb} MB",
+    "upload.choose": "動画を選択するか、ここにドロップ",
+    "upload.format_note": "ブラウザ再生は MP4 と WebM がもっとも安定しています。",
+    "upload.button": "アップロード",
+    "library.title": "動画ライブラリ",
+    "library.refresh": "更新",
+    "replay.title": "再生",
+    "replay.speed": "速度",
+    "replay.previous_frame": "前のフレーム",
+    "replay.next_frame": "次のフレーム",
+    "overlay.poses": "姿勢",
+    "overlay.evaluation_lines": "評価線",
+    "overlay.metric": "指標",
+    "overlay.all_metrics": "すべての指標",
+    "analysis.title": "動作分析",
+    "analysis.video_driven": "動画ベース",
+    "analysis.motion_type": "動作タイプ",
+    "analysis.motion_help": "現在実行できる分析はスイングです。送球、投球、守備は予定カテゴリです。",
+    "analysis.unsupported_motion": "この動作タイプは予定中で、まだ実装されていません。分析するにはスイングを選択してください。",
+    "analysis.selected_video": "選択中の動画",
+    "analysis.pose": "姿勢",
+    "analysis.pose_description": "サンプリングした動画フレームから MediaPipe の身体ランドマークでローカル検出します。",
+    "analysis.events": "イベント",
+    "analysis.events_description": "構え、ストライド、足の着地、インパクト、フォロースルーを自動選択します。",
+    "swing.title": "スイング分析",
+    "swing.note": "選択した保存済み動画から実行します。フレームをサンプリングし、MediaPipe で身体姿勢を追跡し、スイングイベントを検出して採点します。",
+    "swing.handedness": "打席",
+    "swing.handedness_help": "右打ちは左側をリード側、左打ちは右側をリード側として扱います。不明の場合は標準解釈を使うため信頼度が下がります。",
+    "swing.quality_mode": "品質モード",
+    "swing.quality_help": "高精度は速いスイング向けに多くのフレームをサンプリングします。高速は処理時間を短縮しますが、足の着地や推定インパクトを見落とす場合があります。",
+    "swing.advanced_pose_debug": "詳細な姿勢デバッグ",
+    "swing.pose_mode": "姿勢モード",
+    "swing.pose_mode_help": "単一姿勢は時間方向の安定化なしで MediaPipe の生ランドマークを使います。",
+    "swing.overlay_source": "オーバーレイ元",
+    "swing.overlay_source_help": "Raw 表示は検出器の出力と安定化後の分析姿勢を比較するために使います。",
+    "swing.run": "スイング分析を実行",
+    "swing.clear_analysis": "分析をクリア",
+    "swing.run_help": "実行すると選択動画をサンプリングし、MediaPipe の身体姿勢をローカルで追跡し、スイングイベントを検出してメモリ上の結果を返します。クリアはメディアを削除せず結果とオーバーレイだけを消します。",
+    "result.overall": "総合",
+    "result.confidence": "信頼度",
+    "result.confidence_help": "信頼度は、見えているキーポイント品質、打席の確かさ、フェーズ検出の確かさを反映します。",
+    "result.methodology": "評価方式",
+    "result.feedback": "フィードバック",
+    "result.good_points": "良い点",
+    "result.improvement_points": "改善ポイント",
+    "result.drills": "練習メニュー",
+    "result.events_scores": "検出イベントとフェーズスコア",
+    "result.metrics": "指標",
+    "result.detected_faults": "検出された課題",
+    "result.diagnostics": "診断情報",
+    "result.limitations": "制限事項",
+    "result.limitations_help": "制限事項は、サンプリング制限、キーポイント不足、バット情報の弱さ、2Dカメラ制約などを示します。",
+    "result.pose_quality": "姿勢品質",
+    "table.phase": "フェーズ",
+    "table.score": "スコア",
+    "table.weight": "重み",
+    "table.score_confidence": "スコア信頼度",
+    "table.metric": "指標",
+    "table.value": "値",
+    "table.unit": "単位",
+    "table.target": "目標",
+    "table.severity": "重要度",
+    "table.deduction": "減点",
+    "table.evidence": "根拠",
+    "common.clear": "クリア",
+    "common.selected": "選択",
+    "common.size": "サイズ",
+    "common.title": "タイトル",
+    "common.time": "時間",
+    "common.resolution": "解像度",
+    "common.none": "なし",
+    "common.unknown": "不明",
+    "motion.swing": "スイング",
+    "motion.throwing": "送球",
+    "motion.pitching": "投球",
+    "motion.fielding": "守備",
+    "handedness.right_handed": "右打ち",
+    "handedness.left_handed": "左打ち",
+    "quality.higher_accuracy": "高精度",
+    "quality.balanced": "バランス",
+    "quality.faster": "高速",
+    "pose_mode.normal": "通常",
+    "pose_mode.single_pose": "単一姿勢",
+    "overlay_source.stabilized": "安定化後",
+    "overlay_source.raw": "Raw",
+    "status.waiting_video": "動画を待機中です。",
+    "status.ready_upload": "アップロードできます。",
+    "status.uploading": "アップロードして検証中...",
+    "status.upload_complete": "アップロードが完了しました。",
+    "status.upload_failed": "アップロードに失敗しました。",
+    "status.library_loading": "ライブラリを読み込み中...",
+    "status.library_count": "{count} 件の動画があります。",
+    "status.library_empty": "動画はまだありません。",
+    "status.library_unavailable": "ライブラリを利用できません。",
+    "status.deleting": "動画を削除中...",
+    "status.deleted": "動画を削除しました。",
+    "status.delete_failed": "削除に失敗しました。",
+    "status.replay_loading": "再生情報を読み込み中...",
+    "status.replay_unavailable": "再生できません。",
+    "status.ready_analysis": "選択した動画のスイング分析を実行できます。",
+    "status.select_analysis_video": "スイング分析を実行する保存済み動画を選択してください。",
+    "status.select_replay_video": "再生する保存済み動画を選択してください。",
+    "status.select_swing": "分析するにはスイングを選択してください。",
+    "status.analysis_cleared": "分析をクリアしました。",
+    "status.analysis_running": "フレームをサンプリングし、MediaPipe の身体姿勢を追跡中...",
+    "status.analysis_complete": "スイング分析が完了しました。",
+    "status.analysis_cache_complete": "スイング分析が完了しました。姿勢キャッシュを再利用しました。",
+    "status.analysis_failed": "スイング分析に失敗しました。",
+    "status.no_video_selected": "動画未選択",
+    "status.browser_supported": "ブラウザで再生できます。",
+    "status.browser_possibly_unsupported": "アップロード済みですが、このコンテナまたはコーデックは一部のブラウザで再生できない場合があります。",
+    "status.video_missing": "保存済み動画ファイルが見つかりません。",
+    "status.browser_unsupported": "この動画形式はブラウザ再生に対応していません。",
+    "status.video_error": "ブラウザでこの動画を再生できませんでした。MP4 または WebM の対応コーデックを試してください。",
+    "overlay.hidden_select": "オーバーレイ非表示: 保存済み動画を選択してください。",
+    "overlay.hidden_run": "オーバーレイ非表示: スイング分析を実行して姿勢を検出してください。",
+    "overlay.hidden_off": "オーバーレイ非表示: 姿勢と評価線がオフです。",
+    "overlay.active": "オーバーレイ表示中: {modes} を再生に合わせています。",
+    "overlay.showing": "{message} {matchStatus} の {source} 姿勢フレーム {frameIndex} を表示中。",
+    "overlay.poses_mode": "姿勢",
+    "overlay.evaluation_lines_mode": "評価線",
+    "overlay.metric_lines_mode": "{metricLabel} の線",
+    "overlay.metric_groups_mode": "{count} 個の指標グループ",
+    "overlay.interpolated": "補間{offset}",
+    "overlay.nearest_sampled": "最寄りサンプル{offset}",
+    "overlay.exact_sampled": "一致したサンプル",
+    "overlay.offset": "、差分 {offsetMs} ms",
+    "result.summary": "表示フレームに基づく v2 少年野球ベースライン評価では、このスイングは {score}/100、結果の信頼度は {confidence} です。",
+    "result.no_faults": "検出された課題はありません。",
+    "result.event_row": "{label}: フレーム {frameIndex}、イベント信頼度 {confidence}、{method}",
+    "result.fault_row": "{phase} の {faultType}（{severity}）:",
+    "result.fault_evidence": "{evidence} 根拠フレーム: {frames}。",
+    "confirm.delete": "ローカルメディアライブラリから「{displayName}」を削除しますか？",
+  },
+};
+
+const localizedLabels = {
+  en: {
+    metrics: {
+      normalized_stance_width: "Stance width",
+      torso_forward_tilt: "Torso tilt",
+      torso_tilt_preservation: "Tilt hold",
+      grip_loading_vector: "Grip load",
+      rear_knee_sway: "Rear knee sway",
+      head_translation_ratio: "Head drift",
+      early_connection_angle: "Connection",
+      lead_knee_blocking_index: "Lead block",
+      hip_shoulder_separation_timing: "Hip/shoulder timing",
+      estimated_attack_angle: "Attack angle",
+      follow_through_posture_balance: "Follow-through",
+    },
+    values: {
+      setup: "Setup",
+      stride: "Stride",
+      foot_strike: "Foot Strike",
+      impact: "Impact",
+      follow_through: "Follow Through",
+      swing_evaluation_v2: "Swing Evaluation V2",
+      higher_accuracy: "Higher Accuracy",
+      balanced: "Balanced",
+      faster: "Faster",
+      normal: "Normal",
+      notebook_parity: "Single Pose",
+      video: "Video",
+      raw: "Raw",
+      stabilized: "Stabilized",
+      good: "Good",
+      warning: "Warning",
+      severe: "Severe",
+      not_evaluated: "Not Evaluated",
+      door_swing_casting: "Door Swing / Casting",
+      forward_axis_drift_rushing: "Forward Axis Drift / Rushing",
+      arms_only_one_piece: "Arms-Only / One-Piece Swing",
+      excessive_upper_swing_early_extension: "Excessive Upper Swing / Early Extension",
+      collapsed_lead_side: "Collapsed Lead Side",
+      fake_candidate_selection: "Fake Candidate Selection",
+    },
+    diagnostics: {
+      quality_mode: "Quality Mode",
+      sampled_frames: "Sampled Frames",
+      effective_fps: "Effective FPS",
+      cap_applied: "Cap Applied",
+      pose_detection: "Pose Detection",
+      landmark_coverage: "Landmark Coverage",
+      mean_confidence: "Mean Confidence",
+      min_confidence: "Min Confidence",
+      smoothed_frames: "Smoothed Frames",
+      interpolated_frames: "Interpolated Frames",
+      rejected_outliers: "Rejected Outliers",
+      raw_pose_detection: "Raw Pose Detection",
+      raw_landmark_coverage: "Raw Landmark Coverage",
+      pose_mode: "Pose Mode",
+      mediapipe_running_mode: "MediaPipe Running Mode",
+      requested_poses: "Requested Poses",
+      selection_strategy: "Selection Strategy",
+      selected_candidates: "Selected Candidates",
+      max_stabilization_delta: "Max Stabilization Delta",
+      changed_keypoints: "Changed Keypoints",
+      sampling: "Sampling",
+      phase_quality: "Phase Quality",
+    },
+    goodPoints: {
+      "Setup stance width matched the baseline.": "Setup stance width matched the baseline.",
+      "Setup torso forward tilt matched the baseline.":
+        "Setup torso forward tilt matched the baseline.",
+      "Torso forward tilt was preserved from setup to impact.":
+        "Torso forward tilt was preserved from setup to impact.",
+      "Grip loading stayed near the rear-side baseline.": "Grip loading stayed near the rear-side baseline.",
+      "Rear knee sway stayed controlled during stride.": "Rear knee sway stayed controlled during stride.",
+      "Head movement stayed controlled through impact.": "Head movement stayed controlled through impact.",
+      "Lead arm connection stayed in the target range.": "Lead arm connection stayed in the target range.",
+      "Lead knee braced or extended from foot strike to impact.":
+        "Lead knee braced or extended from foot strike to impact.",
+      "Pelvis rotation led shoulder rotation.": "Pelvis rotation led shoulder rotation.",
+      "Attack angle stayed near the target range.": "Attack angle stayed near the target range.",
+      "Follow-through posture and head position stayed controlled.":
+        "Follow-through posture and head position stayed controlled.",
+    },
+    drills: {
+      "Cross-chest rotation drill": "Cross-chest rotation drill",
+      "Inside-out tee drill": "Inside-out tee drill",
+      "5-second rear leg hold drill": "5-second rear leg hold drill",
+      "Single-leg swing drill": "Single-leg swing drill",
+      "Hugged-bat lower-body drill": "Hugged-bat lower-body drill",
+      "Stationary tee work": "Stationary tee work",
+      "High-grip stop drill": "High-grip stop drill",
+      "Hoop rotation drill": "Hoop rotation drill",
+      "Front-leg stiff-stop drill": "Front-leg stiff-stop drill",
+    },
+  },
+  ja: {
+    metrics: {
+      normalized_stance_width: "スタンス幅",
+      torso_forward_tilt: "体幹前傾",
+      torso_tilt_preservation: "前傾維持",
+      grip_loading_vector: "グリップの溜め",
+      rear_knee_sway: "後ろ膝の流れ",
+      head_translation_ratio: "頭の移動",
+      early_connection_angle: "リード腕の連動",
+      lead_knee_blocking_index: "前膝のブロック",
+      hip_shoulder_separation_timing: "骨盤/肩のタイミング",
+      estimated_attack_angle: "推定アタック角",
+      follow_through_posture_balance: "フォロースルー",
+    },
+    values: {
+      setup: "構え",
+      stride: "ストライド",
+      foot_strike: "足の着地",
+      impact: "インパクト",
+      follow_through: "フォロースルー",
+      swing_evaluation_v2: "スイング評価 V2",
+      higher_accuracy: "高精度",
+      balanced: "バランス",
+      faster: "高速",
+      normal: "通常",
+      notebook_parity: "単一姿勢",
+      video: "動画",
+      raw: "Raw",
+      stabilized: "安定化後",
+      good: "良好",
+      warning: "注意",
+      severe: "大きな注意",
+      not_evaluated: "未評価",
+      door_swing_casting: "ドアスイング / キャスティング",
+      forward_axis_drift_rushing: "前方への軸流れ / 突っ込み",
+      arms_only_one_piece: "腕だけ / 一体回転",
+      excessive_upper_swing_early_extension: "過度なアッパー / 早い伸び上がり",
+      collapsed_lead_side: "前側の崩れ",
+      fake_candidate_selection: "テスト用候補選択",
+    },
+    diagnostics: {
+      quality_mode: "品質モード",
+      sampled_frames: "サンプルフレーム",
+      effective_fps: "有効 FPS",
+      cap_applied: "上限適用",
+      pose_detection: "姿勢検出",
+      landmark_coverage: "ランドマーク網羅率",
+      mean_confidence: "平均信頼度",
+      min_confidence: "最小信頼度",
+      smoothed_frames: "平滑化フレーム",
+      interpolated_frames: "補間フレーム",
+      rejected_outliers: "外れ値除外",
+      raw_pose_detection: "Raw 姿勢検出",
+      raw_landmark_coverage: "Raw ランドマーク網羅率",
+      pose_mode: "姿勢モード",
+      mediapipe_running_mode: "MediaPipe 実行モード",
+      requested_poses: "要求姿勢数",
+      selection_strategy: "選択方式",
+      selected_candidates: "選択候補",
+      max_stabilization_delta: "最大安定化差分",
+      changed_keypoints: "変更キーポイント数",
+      sampling: "サンプリング",
+      phase_quality: "フェーズ品質",
+    },
+    goodPoints: {
+      "Setup stance width matched the baseline.": "構えのスタンス幅は評価基準に合っています。",
+      "Setup torso forward tilt matched the baseline.":
+        "構えの体幹前傾は評価基準ンに合っています。",
+      "Torso forward tilt was preserved from setup to impact.":
+        "構えからインパクトまで体幹前傾を維持できています。",
+      "Grip loading stayed near the rear-side baseline.": "グリップの溜めが後ろ側の基準付近に保たれています。",
+      "Rear knee sway stayed controlled during stride.": "ストライド中の後ろ膝の流れが抑えられています。",
+      "Head movement stayed controlled through impact.": "インパクトまで頭の動きが抑えられています。",
+      "Lead arm connection stayed in the target range.": "リード腕の連動角度が目標範囲に収まっています。",
+      "Lead knee braced or extended from foot strike to impact.":
+        "足の着地からインパクトにかけて前膝でブロックできています。",
+      "Pelvis rotation led shoulder rotation.": "骨盤の回転が肩の回転に先行しています。",
+      "Attack angle stayed near the target range.": "アタック角が目標範囲付近に保たれています。",
+      "Follow-through posture and head position stayed controlled.":
+        "フォロースルーの姿勢と頭の位置が安定しています。",
+    },
+    drills: {
+      "Cross-chest rotation drill": "胸の前で腕を組む回転ドリル",
+      "Inside-out tee drill": "インサイドアウト・ティードリル",
+      "5-second rear leg hold drill": "後ろ脚5秒キープドリル",
+      "Single-leg swing drill": "片脚スイングドリル",
+      "Hugged-bat lower-body drill": "バット抱え下半身ドリル",
+      "Stationary tee work": "止まった状態でのティー練習",
+      "High-grip stop drill": "高いグリップ位置で止めるドリル",
+      "Hoop rotation drill": "フープ回転ドリル",
+      "Front-leg stiff-stop drill": "前脚ストップドリル",
+    },
+  },
 };
 
 const skeletonLines = [
@@ -96,6 +570,69 @@ const skeletonLines = [
   ["left_wrist", "bat_tip"],
   ["right_wrist", "bat_tip"],
 ];
+
+function supportedLanguage(language) {
+  return language === "ja" ? "ja" : "en";
+}
+
+function t(key, params = {}) {
+  const template = translations[currentLanguage]?.[key] ?? translations.en[key] ?? key;
+  return template.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? ""));
+}
+
+function localizedGroup(groupName) {
+  return localizedLabels[currentLanguage]?.[groupName] ?? localizedLabels.en[groupName] ?? {};
+}
+
+function localizedValue(value) {
+  const key = String(value ?? "-");
+  return localizedGroup("values")[key] ?? formatTitleCase(key);
+}
+
+function localizedDiagnosticLabel(key) {
+  return localizedGroup("diagnostics")[key] ?? localizedValue(key);
+}
+
+function applyLanguage() {
+  document.documentElement.lang = currentLanguage;
+  if (languageSelect) languageSelect.value = currentLanguage;
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    const params = { maxUploadMb: element.dataset.maxUploadMb ?? "" };
+    element.textContent = t(element.dataset.i18n, params);
+  }
+  updateEvaluationMetricSelect({ preserveSelection: true });
+  refreshStaticStateText();
+  if (lastSwingAnalysisResult) {
+    renderSwingVideoAnalysis(lastSwingAnalysisResult);
+  } else {
+    poseOverlayStatus.textContent = overlayMessage();
+  }
+  if (lastLibraryRecords.length) {
+    renderLibrary(lastLibraryRecords);
+  }
+  drawPoseOverlay();
+}
+
+function refreshStaticStateText() {
+  if (!selectedFile) selectedName.textContent = t("common.none");
+  if (!activeManifest) {
+    replayTitle.textContent = t("status.no_video_selected");
+    analysisVideoTitle.textContent = t("status.no_video_selected");
+    swingAnalysisSource.textContent = t("status.no_video_selected");
+    playbackStatus.textContent = t("status.select_replay_video");
+  }
+  if (!lastSwingAnalysisResult) {
+    swingAnalysisStatus.textContent = activeManifest
+      ? t("status.ready_analysis")
+      : t("status.select_analysis_video");
+  }
+}
+
+languageSelect?.addEventListener("change", () => {
+  currentLanguage = supportedLanguage(languageSelect.value);
+  localStorage.setItem(languageStorageKey, currentLanguage);
+  applyLanguage();
+});
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "-";
@@ -119,23 +656,26 @@ function formatNumber(value, digits = 2) {
   return value.toFixed(digits);
 }
 
-function formatLabel(value) {
-  if (value === "notebook_parity") return "Single Pose";
+function formatTitleCase(value) {
   return String(value ?? "-")
     .replaceAll("_", " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function formatLabel(value) {
+  return localizedValue(value);
+}
+
 function formatEvaluationMetricLabel(metricName) {
-  return evaluationMetricLabels[metricName] ?? formatLabel(metricName);
+  return localizedGroup("metrics")[metricName] ?? formatLabel(metricName);
 }
 
 function setSelectedFile(file) {
   selectedFile = file;
-  selectedName.textContent = file ? file.name : "None";
+  selectedName.textContent = file ? file.name : t("common.none");
   selectedSize.textContent = file ? formatBytes(file.size) : "-";
   uploadButton.disabled = !file;
-  uploadStatus.textContent = file ? "Ready to upload." : "Waiting for a video.";
+  uploadStatus.textContent = file ? t("status.ready_upload") : t("status.waiting_video");
   uploadError.textContent = "";
 }
 
@@ -177,7 +717,7 @@ clearButton.addEventListener("click", () => {
 uploadButton.addEventListener("click", async () => {
   if (!selectedFile) return;
   uploadButton.disabled = true;
-  uploadStatus.textContent = "Uploading and validating...";
+  uploadStatus.textContent = t("status.uploading");
   uploadError.textContent = "";
 
   const formData = new FormData();
@@ -189,11 +729,11 @@ uploadButton.addEventListener("click", async () => {
     if (!response.ok) {
       throw new Error(payload.error?.message ?? "Upload failed.");
     }
-    uploadStatus.textContent = "Upload complete.";
+    uploadStatus.textContent = t("status.upload_complete");
     await loadLibrary(payload.media_id);
   } catch (error) {
     uploadError.textContent = error.message;
-    uploadStatus.textContent = "Upload failed.";
+    uploadStatus.textContent = t("status.upload_failed");
   } finally {
     uploadButton.disabled = !selectedFile;
   }
@@ -204,7 +744,7 @@ refreshButton.addEventListener("click", () => {
 });
 
 async function loadLibrary(selectMediaId = null) {
-  libraryStatus.textContent = "Loading library...";
+  libraryStatus.textContent = t("status.library_loading");
   videoLibrary.replaceChildren();
   try {
     const response = await fetch(apiBase);
@@ -212,13 +752,17 @@ async function loadLibrary(selectMediaId = null) {
     if (!response.ok) {
       throw new Error(payload.error?.message ?? "Could not load the library.");
     }
+    lastLibraryRecords = payload;
     renderLibrary(payload);
-    libraryStatus.textContent = payload.length ? `${payload.length} video(s) available.` : "No videos yet.";
+    libraryStatus.textContent = payload.length
+      ? t("status.library_count", { count: payload.length })
+      : t("status.library_empty");
     if (selectMediaId) {
       await loadReplay(selectMediaId);
     }
   } catch (error) {
-    libraryStatus.textContent = "Library unavailable.";
+    libraryStatus.textContent = t("status.library_unavailable");
+    lastLibraryRecords = [];
     videoLibrary.textContent = "";
     uploadError.textContent = error.message;
   }
@@ -244,13 +788,13 @@ function renderLibrary(records) {
 
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = "Replay";
+    button.textContent = t("replay.title");
     button.addEventListener("click", () => loadReplay(record.media_id));
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "danger";
-    deleteButton.textContent = "Delete";
+    deleteButton.textContent = currentLanguage === "ja" ? "削除" : "Delete";
     deleteButton.addEventListener("click", () => deleteVideo(record.media_id, record.display_name));
 
     const actions = document.createElement("div");
@@ -263,10 +807,10 @@ function renderLibrary(records) {
 }
 
 async function deleteVideo(mediaId, displayName) {
-  const confirmed = window.confirm(`Delete "${displayName}" from the local media library?`);
+  const confirmed = window.confirm(t("confirm.delete", { displayName }));
   if (!confirmed) return;
 
-  libraryStatus.textContent = "Deleting video...";
+  libraryStatus.textContent = t("status.deleting");
   try {
     const response = await fetch(`${apiBase}/${mediaId}`, { method: "DELETE" });
     const payload = await response.json();
@@ -276,16 +820,16 @@ async function deleteVideo(mediaId, displayName) {
     if (activeManifest?.media_id === mediaId) {
       clearReplay();
     }
-    libraryStatus.textContent = "Video deleted.";
+    libraryStatus.textContent = t("status.deleted");
     await loadLibrary();
   } catch (error) {
-    libraryStatus.textContent = "Delete failed.";
+    libraryStatus.textContent = t("status.delete_failed");
     uploadError.textContent = error.message;
   }
 }
 
 async function loadReplay(mediaId) {
-  playbackStatus.textContent = "Loading replay...";
+  playbackStatus.textContent = t("status.replay_loading");
   playbackError.textContent = "";
   try {
     const response = await fetch(`${apiBase}/${mediaId}/replay`);
@@ -304,23 +848,23 @@ async function loadReplay(mediaId) {
     previousFrameButton.disabled = !manifest.fps;
     nextFrameButton.disabled = !manifest.fps;
     playbackStatus.textContent = playbackMessage(manifest.browser_playback_status);
-    clearAnalysis({ status: "Ready to run swing analysis for the selected video." });
+    clearAnalysis({ status: t("status.ready_analysis") });
     updateCurrentTime();
     updateSwingRunState();
     drawPoseOverlay();
   } catch (error) {
     playbackError.textContent = error.message;
-    playbackStatus.textContent = "Replay unavailable.";
+    playbackStatus.textContent = t("status.replay_unavailable");
   }
 }
 
 function playbackMessage(status) {
-  if (status === "supported") return "Ready for browser playback.";
+  if (status === "supported") return t("status.browser_supported");
   if (status === "possibly_unsupported") {
-    return "Uploaded, but this container or codec may not play in every browser.";
+    return t("status.browser_possibly_unsupported");
   }
-  if (status === "missing") return "The stored video file is missing.";
-  return "This video format is not supported for browser replay.";
+  if (status === "missing") return t("status.video_missing");
+  return t("status.browser_unsupported");
 }
 
 function clearReplay() {
@@ -328,17 +872,17 @@ function clearReplay() {
   videoPlayer.pause();
   videoPlayer.removeAttribute("src");
   videoPlayer.load();
-  replayTitle.textContent = "No video selected";
-  analysisVideoTitle.textContent = "No video selected";
-  swingAnalysisSource.textContent = "No video selected";
+  replayTitle.textContent = t("status.no_video_selected");
+  analysisVideoTitle.textContent = t("status.no_video_selected");
+  swingAnalysisSource.textContent = t("status.no_video_selected");
   currentTime.textContent = "0.00 / 0.00 s";
   resolution.textContent = "-";
   fps.textContent = "-";
   previousFrameButton.disabled = true;
   nextFrameButton.disabled = true;
-  playbackStatus.textContent = "Select a stored video to replay.";
+  playbackStatus.textContent = t("status.select_replay_video");
   playbackError.textContent = "";
-  clearAnalysis({ status: "Select a stored video to run swing analysis." });
+  clearAnalysis({ status: t("status.select_analysis_video") });
   updateSwingRunState();
   drawPoseOverlay();
 }
@@ -354,9 +898,9 @@ motionType.addEventListener("change", () => {
   clearAnalysis({
     status: isSwing
       ? activeManifest
-        ? "Ready to run swing analysis for the selected video."
-        : "Select a stored video to run swing analysis."
-      : "Select Swing to run analysis.",
+        ? t("status.ready_analysis")
+        : t("status.select_analysis_video")
+      : t("status.select_swing"),
   });
   updateSwingRunState();
   drawPoseOverlay();
@@ -365,24 +909,24 @@ motionType.addEventListener("change", () => {
 swingHandedness.addEventListener("change", () => {
   clearAnalysis({
     status: activeManifest
-      ? "Ready to run swing analysis for the selected video."
-      : "Select a stored video to run swing analysis.",
+      ? t("status.ready_analysis")
+      : t("status.select_analysis_video"),
   });
 });
 
 swingQualityMode.addEventListener("change", () => {
   clearAnalysis({
     status: activeManifest
-      ? "Ready to run swing analysis for the selected video."
-      : "Select a stored video to run swing analysis.",
+      ? t("status.ready_analysis")
+      : t("status.select_analysis_video"),
   });
 });
 
 swingPoseMode.addEventListener("change", () => {
   clearAnalysis({
     status: activeManifest
-      ? "Ready to run swing analysis for the selected video."
-      : "Select a stored video to run swing analysis.",
+      ? t("status.ready_analysis")
+      : t("status.select_analysis_video"),
   });
 });
 
@@ -391,13 +935,13 @@ poseOverlaySource.addEventListener("change", () => {
 });
 
 clearSwingAnalysisButton.addEventListener("click", () => {
-  clearAnalysis({ status: "Analysis cleared." });
+  clearAnalysis({ status: t("status.analysis_cleared") });
   drawPoseOverlay();
 });
 
 runSwingAnalysisButton.addEventListener("click", async () => {
   if (motionType.value !== "swing" || !activeManifest) return;
-  clearAnalysis({ status: "Sampling frames and tracking MediaPipe body pose..." });
+  clearAnalysis({ status: t("status.analysis_running") });
   swingAnalysisError.textContent = "";
   runSwingAnalysisButton.disabled = true;
 
@@ -421,12 +965,12 @@ runSwingAnalysisButton.addEventListener("click", async () => {
     }
     renderSwingVideoAnalysis(result);
     swingAnalysisStatus.textContent = result.pose_cache_hit
-      ? "Swing analysis complete. Pose cache reused."
-      : "Swing analysis complete.";
+      ? t("status.analysis_cache_complete")
+      : t("status.analysis_complete");
     poseOverlayStatus.textContent = overlayMessage();
   } catch (error) {
     swingAnalysisError.textContent = error.message;
-    swingAnalysisStatus.textContent = "Swing analysis failed.";
+    swingAnalysisStatus.textContent = t("status.analysis_failed");
   } finally {
     updateSwingRunState();
     drawPoseOverlay();
@@ -434,6 +978,7 @@ runSwingAnalysisButton.addEventListener("click", async () => {
 });
 
 function clearAnalysis({ status }) {
+  lastSwingAnalysisResult = null;
   analysisOverlayFrames = [];
   analysisRawOverlayFrames = [];
   analysisEvents = [];
@@ -464,6 +1009,7 @@ function clearAnalysis({ status }) {
 }
 
 function renderSwingVideoAnalysis(result) {
+  lastSwingAnalysisResult = result;
   const analysis = result.analysis;
   const feedback = result.feedback;
   const limitations = uniqueValues([...(feedback.limitations ?? []), ...(result.limitations ?? [])]);
@@ -479,11 +1025,11 @@ function renderSwingVideoAnalysis(result) {
   swingOverallScore.textContent = `${formatNumber(analysis.overall_score, 1)}/100`;
   swingConfidence.textContent = formatNumber(analysis.confidence, 2);
   swingMethodology.textContent = formatLabel(analysis.methodology_version ?? "swing_evaluation_v2");
-  swingSummary.textContent = feedback.summary;
-  renderList(swingGoodPoints, feedback.good_points);
-  renderList(swingImprovementPoints, feedback.improvement_points);
-  renderList(swingDrills, feedback.drills_or_suggestions);
-  renderList(swingLimitations, limitations);
+  swingSummary.textContent = localizedSwingSummary(analysis, feedback);
+  renderList(swingGoodPoints, localizedGoodPoints(analysis, feedback));
+  renderList(swingImprovementPoints, localizedImprovementPoints(analysis, feedback));
+  renderList(swingDrills, localizedDrills(feedback));
+  renderList(swingLimitations, localizedLimitations(limitations));
   renderSwingEvents(analysisEvents);
   renderPoseQuality(
     result.pose_diagnostics,
@@ -496,6 +1042,97 @@ function renderSwingVideoAnalysis(result) {
   renderFaults(analysis.detected_faults);
   swingAnalysisResults.hidden = false;
   drawPoseOverlay();
+}
+
+function localizedSwingSummary(analysis, feedback) {
+  if (currentLanguage === "en") return feedback.summary;
+  return t("result.summary", {
+    score: formatNumber(analysis.overall_score, 1),
+    confidence: formatNumber(analysis.confidence, 2),
+  });
+}
+
+function localizedGoodPoints(analysis, feedback) {
+  if (currentLanguage === "en") return feedback.good_points;
+  const goodPointLabels = localizedGroup("goodPoints");
+  return (analysis.good_points?.length ? analysis.good_points : feedback.good_points ?? []).map(
+    (point) => goodPointLabels[point] ?? point,
+  );
+}
+
+function localizedImprovementPoints(analysis, feedback) {
+  if (currentLanguage === "en") return feedback.improvement_points;
+  if (analysis.detected_faults?.length) {
+    return analysis.detected_faults.map((fault) => localizedFaultFeedback(fault));
+  }
+  const weakMetrics = (analysis.metrics ?? []).filter((metric) =>
+    ["warning", "severe"].includes(metric.severity),
+  );
+  if (weakMetrics.length) {
+    return weakMetrics.map(
+      (metric) =>
+        `${formatEvaluationMetricLabel(metric.name)} に注意が必要な可能性があります。測定値: ${
+          metric.value === null ? "-" : formatNumber(metric.value, 2)
+        }。`,
+    );
+  }
+  return ["利用できるキーポイントからは大きな改善ポイントは検出されませんでした。"];
+}
+
+function localizedFaultFeedback(fault) {
+  const messages = {
+    door_swing_casting:
+      "手が身体から早く離れている可能性があり、スイング軌道が大きくなってコンタクトが遅れやすくなります。",
+    forward_axis_drift_rushing:
+      "頭や上半身が早く前に動いている可能性があり、コンタクトのタイミングが不安定になりやすくなります。",
+    arms_only_one_piece:
+      "腰と肩が一緒に回っている可能性があり、下半身の力をスイングに使いにくくなります。",
+    excessive_upper_swing_early_extension:
+      "コンタクトに向けてスイング軌道が上向きになりすぎている可能性があります。",
+    collapsed_lead_side:
+      "インパクトで前側が柔らかくなっている可能性があり、力が前に逃げやすくなります。",
+  };
+  const severityText = fault.severity === "severe" ? "強く" : "可能性として";
+  const evidence = fault.evidence ? ` 根拠: ${fault.evidence}` : "";
+  return `${messages[fault.fault_type] ?? localizedValue(fault.fault_type)} ${severityText}示されています。${evidence}`;
+}
+
+function localizedDrills(feedback) {
+  if (currentLanguage === "en") return feedback.drills_or_suggestions;
+  const drillLabels = localizedGroup("drills");
+  return (feedback.drills_or_suggestions ?? []).map((drill) => drillLabels[drill] ?? drill);
+}
+
+function localizedLimitations(limitations) {
+  if (currentLanguage === "en") return limitations;
+  return limitations.map((limitation) => localizedLimitation(limitation));
+}
+
+function localizedLimitation(limitation) {
+  const knownLimitations = {
+    "This is a 2D side-view rule-based evaluation and may miss 3D movement details.":
+      "これは2D側面映像に基づくルール評価であり、3Dの動きの詳細を見落とす場合があります。",
+    "Swing handedness was unknown, so lead/rear side mapping is lower confidence.":
+      "打席が不明なため、リード側/後ろ側の対応づけの信頼度が下がっています。",
+    "Automatic phase fallback used fewer than five unique frames.":
+      "自動フェーズ推定で5つ未満の固有フレームしか使えませんでした。",
+    "No sampled video frames were available for pose estimation.":
+      "姿勢推定に使えるサンプル動画フレームがありませんでした。",
+    "Pose detection covered fewer than 80% of sampled frames.":
+      "姿勢検出はサンプルフレームの80%未満にとどまりました。",
+    "Required body landmark coverage was low for swing evaluation.":
+      "スイング評価に必要な身体ランドマークの網羅率が低くなっています。",
+    "MediaPipe Pose tracks player body landmarks only; bat tip, bat barrel, and ball position are not detected.":
+      "MediaPipe Pose は選手の身体ランドマークのみを追跡し、バット先端、バレル、ボール位置は検出しません。",
+  };
+  if (knownLimitations[limitation]) return knownLimitations[limitation];
+  if (limitation.toLowerCase().includes("bat tip")) {
+    return "バット先端、バレル、またはボール位置が検出されていないため、バット軌道に関する評価の信頼度は限定的です。";
+  }
+  if (limitation.toLowerCase().includes("mediapipe")) {
+    return `MediaPipe 関連の制限: ${limitation}`;
+  }
+  return limitation;
 }
 
 function uniqueValues(values) {
@@ -515,7 +1152,12 @@ function renderSwingEvents(events) {
   swingEvents.replaceChildren();
   for (const event of events ?? []) {
     const item = document.createElement("li");
-    item.textContent = `${event.label}: frame ${event.frame_index}, Event confidence ${formatNumber(event.confidence, 2)}, ${formatLabel(event.detection_method)}`;
+    item.textContent = t("result.event_row", {
+      label: localizedValue(event.phase) || event.label,
+      frameIndex: event.frame_index,
+      confidence: formatNumber(event.confidence, 2),
+      method: formatLabel(event.detection_method),
+    });
     swingEvents.append(item);
   }
 }
@@ -523,40 +1165,40 @@ function renderSwingEvents(events) {
 function renderPoseQuality(poseDiagnostics, samplingDiagnostics, rawPoseDiagnostics = null, poseDebugDiagnostics = null) {
   swingPoseQuality.replaceChildren();
   if (!poseDiagnostics && !samplingDiagnostics && !rawPoseDiagnostics && !poseDebugDiagnostics) {
-    appendDiagnostic("Sampling", "-");
-    appendDiagnostic("Pose Detection", "-");
-    appendDiagnostic("Landmark Coverage", "-");
-    appendDiagnostic("Phase Quality", "-");
+    appendDiagnostic(localizedDiagnosticLabel("sampling"), "-");
+    appendDiagnostic(localizedDiagnosticLabel("pose_detection"), "-");
+    appendDiagnostic(localizedDiagnosticLabel("landmark_coverage"), "-");
+    appendDiagnostic(localizedDiagnosticLabel("phase_quality"), "-");
     return;
   }
 
   if (samplingDiagnostics) {
-    appendDiagnostic("Quality Mode", formatLabel(samplingDiagnostics.quality_mode));
-    appendDiagnostic("Sampled Frames", `${samplingDiagnostics.sampled_frame_count} / ${samplingDiagnostics.total_frame_count ?? "-"}`);
-    appendDiagnostic("Effective FPS", formatNumber(samplingDiagnostics.effective_fps, 2));
-    appendDiagnostic("Cap Applied", samplingDiagnostics.cap_applied ? "Yes" : "No");
+    appendDiagnostic(localizedDiagnosticLabel("quality_mode"), formatLabel(samplingDiagnostics.quality_mode));
+    appendDiagnostic(localizedDiagnosticLabel("sampled_frames"), `${samplingDiagnostics.sampled_frame_count} / ${samplingDiagnostics.total_frame_count ?? "-"}`);
+    appendDiagnostic(localizedDiagnosticLabel("effective_fps"), formatNumber(samplingDiagnostics.effective_fps, 2));
+    appendDiagnostic(localizedDiagnosticLabel("cap_applied"), samplingDiagnostics.cap_applied ? (currentLanguage === "ja" ? "はい" : "Yes") : (currentLanguage === "ja" ? "いいえ" : "No"));
   }
   if (poseDiagnostics) {
-    appendDiagnostic("Pose Detection", `${formatNumber(poseDiagnostics.detected_pose_frame_ratio * 100, 0)}%`);
-    appendDiagnostic("Landmark Coverage", `${formatNumber(poseDiagnostics.required_landmark_coverage * 100, 0)}%`);
-    appendDiagnostic("Mean Confidence", formatNumber(poseDiagnostics.mean_confidence, 2));
-    appendDiagnostic("Min Confidence", formatNumber(poseDiagnostics.min_confidence, 2));
-    appendDiagnostic("Smoothed Frames", String(poseDiagnostics.smoothed_frame_count));
-    appendDiagnostic("Interpolated Frames", String(poseDiagnostics.interpolated_frame_count));
-    appendDiagnostic("Rejected Outliers", String(poseDiagnostics.rejected_outlier_count));
+    appendDiagnostic(localizedDiagnosticLabel("pose_detection"), `${formatNumber(poseDiagnostics.detected_pose_frame_ratio * 100, 0)}%`);
+    appendDiagnostic(localizedDiagnosticLabel("landmark_coverage"), `${formatNumber(poseDiagnostics.required_landmark_coverage * 100, 0)}%`);
+    appendDiagnostic(localizedDiagnosticLabel("mean_confidence"), formatNumber(poseDiagnostics.mean_confidence, 2));
+    appendDiagnostic(localizedDiagnosticLabel("min_confidence"), formatNumber(poseDiagnostics.min_confidence, 2));
+    appendDiagnostic(localizedDiagnosticLabel("smoothed_frames"), String(poseDiagnostics.smoothed_frame_count));
+    appendDiagnostic(localizedDiagnosticLabel("interpolated_frames"), String(poseDiagnostics.interpolated_frame_count));
+    appendDiagnostic(localizedDiagnosticLabel("rejected_outliers"), String(poseDiagnostics.rejected_outlier_count));
   }
   if (rawPoseDiagnostics) {
-    appendDiagnostic("Raw Pose Detection", `${formatNumber(rawPoseDiagnostics.detected_pose_frame_ratio * 100, 0)}%`);
-    appendDiagnostic("Raw Landmark Coverage", `${formatNumber(rawPoseDiagnostics.required_landmark_coverage * 100, 0)}%`);
+    appendDiagnostic(localizedDiagnosticLabel("raw_pose_detection"), `${formatNumber(rawPoseDiagnostics.detected_pose_frame_ratio * 100, 0)}%`);
+    appendDiagnostic(localizedDiagnosticLabel("raw_landmark_coverage"), `${formatNumber(rawPoseDiagnostics.required_landmark_coverage * 100, 0)}%`);
   }
   if (poseDebugDiagnostics) {
-    appendDiagnostic("Pose Mode", formatLabel(poseDebugDiagnostics.processing_mode));
-    appendDiagnostic("MediaPipe Running Mode", formatLabel(poseDebugDiagnostics.running_mode));
-    appendDiagnostic("Requested Poses", String(poseDebugDiagnostics.requested_num_poses));
-    appendDiagnostic("Selection Strategy", formatLabel(poseDebugDiagnostics.player_selection_strategy));
-    appendDiagnostic("Selected Candidates", (poseDebugDiagnostics.selected_candidate_indexes ?? []).join(", ") || "-");
-    appendDiagnostic("Max Stabilization Delta", formatNumber(poseDebugDiagnostics.max_stabilization_delta_ratio, 2));
-    appendDiagnostic("Changed Keypoints", String(poseDebugDiagnostics.stabilization_changed_keypoint_count ?? 0));
+    appendDiagnostic(localizedDiagnosticLabel("pose_mode"), formatLabel(poseDebugDiagnostics.processing_mode));
+    appendDiagnostic(localizedDiagnosticLabel("mediapipe_running_mode"), formatLabel(poseDebugDiagnostics.running_mode));
+    appendDiagnostic(localizedDiagnosticLabel("requested_poses"), String(poseDebugDiagnostics.requested_num_poses));
+    appendDiagnostic(localizedDiagnosticLabel("selection_strategy"), formatLabel(poseDebugDiagnostics.player_selection_strategy));
+    appendDiagnostic(localizedDiagnosticLabel("selected_candidates"), (poseDebugDiagnostics.selected_candidate_indexes ?? []).join(", ") || "-");
+    appendDiagnostic(localizedDiagnosticLabel("max_stabilization_delta"), formatNumber(poseDebugDiagnostics.max_stabilization_delta_ratio, 2));
+    appendDiagnostic(localizedDiagnosticLabel("changed_keypoints"), String(poseDebugDiagnostics.stabilization_changed_keypoint_count ?? 0));
   }
 }
 
@@ -606,7 +1248,7 @@ function renderFaults(faults) {
   swingFaults.replaceChildren();
   if (!faults?.length) {
     const empty = document.createElement("p");
-    empty.textContent = "No detected faults.";
+    empty.textContent = t("result.no_faults");
     swingFaults.append(empty);
     return;
   }
@@ -616,12 +1258,19 @@ function renderFaults(faults) {
     const item = document.createElement("li");
     item.className = "fault-item";
     item.append(
-      `${formatLabel(fault.fault_type)} at ${formatLabel(fault.phase)} (${formatLabel(fault.severity)}):`,
+      t("result.fault_row", {
+        faultType: formatLabel(fault.fault_type),
+        phase: formatLabel(fault.phase),
+        severity: formatLabel(fault.severity),
+      }),
     );
     const evidence = document.createElement("div");
     evidence.className = "evidence-cell fault-evidence";
     evidence.tabIndex = 0;
-    evidence.textContent = `${fault.evidence} Evidence frames: ${(fault.evidence_frames ?? []).join(", ")}.`;
+    evidence.textContent = t("result.fault_evidence", {
+      evidence: fault.evidence,
+      frames: (fault.evidence_frames ?? []).join(", "),
+    });
     item.append(evidence);
     list.append(item);
   }
@@ -712,7 +1361,12 @@ function drawPoseOverlay() {
   if (hasActiveOverlay && frame.is_event_frame) {
     drawEventLabel(context, frame, canvas.width);
   }
-  poseOverlayStatus.textContent = `${overlayMessage()} Showing ${overlayFrameMatchStatus(frame)} ${frame.source ?? poseOverlaySource.value} pose frame ${frame.frame_index}.`;
+  poseOverlayStatus.textContent = t("overlay.showing", {
+    message: overlayMessage(),
+    matchStatus: overlayFrameMatchStatus(frame),
+    source: formatLabel(frame.source ?? poseOverlaySource.value),
+    frameIndex: frame.frame_index,
+  });
 }
 
 function updatePoseOverlayToggle() {
@@ -736,7 +1390,7 @@ function updateEvaluationMetricSelect({ preserveSelection = true } = {}) {
   evaluationMetricMenu.append(
     evaluationMetricMenuItem({
       value: allEvaluationMetricsValue,
-      label: "All metrics",
+      label: t("overlay.all_metrics"),
       checked: selectedEvaluationMetrics.size === 0,
     }),
   );
@@ -784,12 +1438,12 @@ function syncEvaluationMetricSelectSelection() {
 }
 
 function selectedEvaluationMetricLabel() {
-  if (selectedEvaluationMetrics.size === 0) return "All metrics";
+  if (selectedEvaluationMetrics.size === 0) return t("overlay.all_metrics");
   if (selectedEvaluationMetrics.size === 1) {
     const [metricName] = selectedEvaluationMetrics;
     return formatEvaluationMetricLabel(metricName);
   }
-  return `${selectedEvaluationMetrics.size} metrics`;
+  return t("overlay.metric_groups_mode", { count: selectedEvaluationMetrics.size });
 }
 
 function evaluationMetricNames() {
@@ -868,11 +1522,13 @@ function overlayFrameMatchStatus(frame) {
   const fpsValue = activeManifest?.fps;
   const frameTime = Number.isFinite(frame.timestamp_seconds) ? frame.timestamp_seconds : null;
   const offsetMs = frameTime === null ? null : Math.round((frameTime - videoPlayer.currentTime) * 1000);
-  const offsetText = offsetMs === null || offsetMs === 0 ? "" : `, offset ${offsetMs} ms`;
-  if (hasInterpolatedLandmarks) return `interpolated${offsetText}`;
-  if (!fpsValue) return `nearest sampled${offsetText}`;
+  const offsetText = offsetMs === null || offsetMs === 0 ? "" : t("overlay.offset", { offsetMs });
+  if (hasInterpolatedLandmarks) return t("overlay.interpolated", { offset: offsetText });
+  if (!fpsValue) return t("overlay.nearest_sampled", { offset: offsetText });
   const currentFrameIndex = Math.round(videoPlayer.currentTime * fpsValue);
-  return currentFrameIndex === frame.frame_index ? "exact sampled" : `nearest sampled${offsetText}`;
+  return currentFrameIndex === frame.frame_index
+    ? t("overlay.exact_sampled")
+    : t("overlay.nearest_sampled", { offset: offsetText });
 }
 
 function drawSkeletonLines(context, keypoints, contentRect) {
@@ -960,7 +1616,7 @@ function evaluationLineColor(line) {
 }
 
 function drawEvaluationLineLabel(context, line, start, end) {
-  const label = line.label ?? formatLabel(line.metric_name);
+  const label = formatEvaluationMetricLabel(line.metric_name) || line.label;
   const x = (start.x + end.x) / 2;
   const y = (start.y + end.y) / 2;
   context.font = "700 11px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
@@ -979,7 +1635,7 @@ function drawEventLabel(context, frame, width) {
   if (!event) return;
   context.save();
   context.font = "700 13px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
-  const label = event.label;
+  const label = localizedValue(event.phase) || event.label;
   const textWidth = context.measureText(label).width;
   context.fillStyle = "rgba(255, 77, 79, 0.9)";
   context.fillRect(8, 8, Math.min(width - 16, textWidth + 16), 24);
@@ -1026,24 +1682,24 @@ function clamp(value, min, max) {
 }
 
 function overlayMessage() {
-  if (!activeManifest) return "Overlay hidden: select a stored video.";
-  if (!currentOverlayFrames().length) return "Overlay hidden: run swing analysis to detect pose.";
+  if (!activeManifest) return t("overlay.hidden_select");
+  if (!currentOverlayFrames().length) return t("overlay.hidden_run");
   const activeModes = [];
-  if (poseOverlayEnabled) activeModes.push("poses");
+  if (poseOverlayEnabled) activeModes.push(t("overlay.poses_mode"));
   if (evaluationLinesEnabled) {
     activeModes.push(evaluationLinesMessage());
   }
-  if (!activeModes.length) return "Overlay hidden: poses and evaluation lines are off.";
-  return `Overlay active: ${activeModes.join(" + ")} aligned to replay.`;
+  if (!activeModes.length) return t("overlay.hidden_off");
+  return t("overlay.active", { modes: activeModes.join(" + ") });
 }
 
 function evaluationLinesMessage() {
-  if (selectedEvaluationMetrics.size === 0) return "evaluation lines";
+  if (selectedEvaluationMetrics.size === 0) return t("overlay.evaluation_lines_mode");
   if (selectedEvaluationMetrics.size === 1) {
     const [metricName] = selectedEvaluationMetrics;
-    return `${formatEvaluationMetricLabel(metricName)} lines`;
+    return t("overlay.metric_lines_mode", { metricLabel: formatEvaluationMetricLabel(metricName) });
   }
-  return `${selectedEvaluationMetrics.size} metric groups`;
+  return t("overlay.metric_groups_mode", { count: selectedEvaluationMetrics.size });
 }
 
 playbackRate.addEventListener("change", () => {
@@ -1059,7 +1715,7 @@ videoPlayer.addEventListener("loadedmetadata", () => {
   drawPoseOverlay();
 });
 videoPlayer.addEventListener("error", () => {
-  playbackError.textContent = "The browser could not play this video. Try MP4 or WebM with a browser-supported codec.";
+  playbackError.textContent = t("status.video_error");
 });
 window.addEventListener("resize", drawPoseOverlay);
 
@@ -1079,5 +1735,6 @@ function stepFrame(direction) {
 }
 
 loadLibrary();
-clearAnalysis({ status: "Select a stored video to run swing analysis." });
+applyLanguage();
+clearAnalysis({ status: t("status.select_analysis_video") });
 updateSwingRunState();

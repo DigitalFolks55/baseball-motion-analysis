@@ -170,6 +170,14 @@ Current foundation:
   bottom of motion analysis.
 - Detected-event rows label motion phase-detection confidence as `Event confidence`,
   while the phase-score table labels scoring-evidence confidence as `Score Confidence`.
+- The browser UI now includes an `English / 日本語` language selector. English is the
+  default language, and Japanese can be selected in the same UI. Switching language
+  updates user-facing labels, status messages, overlay copy, and visible swing result
+  text without rerunning analysis.
+- Japanese result rendering uses browser-side localization over structured analysis
+  values, known feedback templates, metric names, events, faults, drills, and common
+  limitations. Swing scoring, thresholds, storage, video handling, pose estimation,
+  application services, and API responses remain language-independent.
 
 Current limitations:
 
@@ -189,3 +197,5 @@ Current limitations:
   swing fixtures.
 - Report persistence is not implemented.
 - Fielding, throwing, and pitching analysis remain planned.
+- Japanese localization currently covers the local browser UI and known swing-result
+  templates. Any new feedback template should add English and Japanese UI text together.

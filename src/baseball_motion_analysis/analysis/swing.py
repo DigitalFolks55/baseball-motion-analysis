@@ -733,8 +733,8 @@ def _aggregate_confidence(
 
 def _good_points(metrics: Sequence[SwingMetricResult]) -> tuple[str, ...]:
     messages = {
-        SwingMetricName.NORMALIZED_STANCE_WIDTH: "Setup stance width matched the v2 baseline.",
-        SwingMetricName.TORSO_FORWARD_TILT: "Setup torso forward tilt matched the v2 baseline.",
+        SwingMetricName.NORMALIZED_STANCE_WIDTH: "Setup stance width matched the baseline.",
+        SwingMetricName.TORSO_FORWARD_TILT: "Setup torso forward tilt matched the baseline.",
         SwingMetricName.TORSO_TILT_PRESERVATION: (
             "Torso forward tilt was preserved from setup to impact."
         ),

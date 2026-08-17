@@ -11,9 +11,16 @@
     <header class="app-header">
       <div>
         <h1>baseball_motion_analysis</h1>
-        <p>Baseball Motion Video Review</p>
+        <p data-i18n="app.subtitle">Baseball Motion Video Review</p>
       </div>
       <div class="header-meta">
+        <label class="language-control" for="languageSelect">
+          <span data-i18n="language.label">Language</span>
+          <select id="languageSelect" autocomplete="off">
+            <option value="en" selected>English</option>
+            <option value="ja">日本語</option>
+          </select>
+        </label>
         <span class="mode-badge">{{ runtime_mode | title }}</span>
         <span class="privacy-note">{{ privacy_storage_label }}</span>
       </div>
@@ -26,30 +33,30 @@
     <main class="layout review-layout">
       <section class="upload-panel review-column" aria-labelledby="upload-title">
         <div class="section-heading">
-          <h2 id="upload-title">Upload Video</h2>
-          <span>Max {{ max_upload_mb }} MB</span>
+          <h2 id="upload-title" data-i18n="upload.title">Upload Video</h2>
+          <span data-i18n="upload.max" data-max-upload-mb="{{ max_upload_mb }}">Max {{ max_upload_mb }} MB</span>
         </div>
 
         <div id="dropZone" class="drop-zone" tabindex="0">
           <input id="videoFile" type="file" accept="video/mp4,video/webm,video/quicktime,.mov,.avi,.mkv" />
-          <label for="videoFile">Choose a video or drop it here</label>
-          <p>MP4 and WebM are the most reliable browser replay formats.</p>
+          <label for="videoFile" data-i18n="upload.choose">Choose a video or drop it here</label>
+          <p data-i18n="upload.format_note">MP4 and WebM are the most reliable browser replay formats.</p>
         </div>
 
         <dl class="file-details">
           <div>
-            <dt>Selected</dt>
+            <dt data-i18n="common.selected">Selected</dt>
             <dd id="selectedName">None</dd>
           </div>
           <div>
-            <dt>Size</dt>
+            <dt data-i18n="common.size">Size</dt>
             <dd id="selectedSize">-</dd>
           </div>
         </dl>
 
         <div class="actions">
-          <button id="uploadButton" type="button" disabled>Upload</button>
-          <button id="clearButton" type="button" class="secondary">Clear</button>
+          <button id="uploadButton" type="button" disabled data-i18n="upload.button">Upload</button>
+          <button id="clearButton" type="button" class="secondary" data-i18n="common.clear">Clear</button>
         </div>
 
         <p id="uploadStatus" class="status-line" aria-live="polite">Waiting for a video.</p>
@@ -58,8 +65,8 @@
 
       <section class="library-panel review-column" aria-labelledby="library-title">
         <div class="section-heading">
-          <h2 id="library-title">Video Library</h2>
-          <button id="refreshButton" type="button" class="secondary">Refresh</button>
+          <h2 id="library-title" data-i18n="library.title">Video Library</h2>
+          <button id="refreshButton" type="button" class="secondary" data-i18n="library.refresh">Refresh</button>
         </div>
         <div id="libraryStatus" class="status-line" aria-live="polite">Loading library...</div>
         <div id="videoLibrary" class="video-library"></div>
@@ -67,19 +74,19 @@
 
       <section class="replay-panel review-column" aria-labelledby="replay-title">
         <div class="section-heading">
-          <h2 id="replay-title">Replay</h2>
+          <h2 id="replay-title" data-i18n="replay.title">Replay</h2>
           <div class="replay-toolbar">
-            <button id="poseOverlayToggle" type="button" class="secondary overlay-toggle pose-overlay-toggle" aria-pressed="false" disabled>Poses</button>
-            <button id="evaluationLinesToggle" type="button" class="secondary evaluation-lines-toggle" aria-pressed="false" disabled>Evaluation Lines</button>
+            <button id="poseOverlayToggle" type="button" class="secondary overlay-toggle pose-overlay-toggle" aria-pressed="false" disabled data-i18n="overlay.poses">Poses</button>
+            <button id="evaluationLinesToggle" type="button" class="secondary evaluation-lines-toggle" aria-pressed="false" disabled data-i18n="overlay.evaluation_lines">Evaluation Lines</button>
             <div id="evaluationMetricControl" class="toolbar-field metric-control">
-              <span id="evaluationMetricLabel">Metric</span>
+              <span id="evaluationMetricLabel" data-i18n="overlay.metric">Metric</span>
               <div class="metric-dropdown">
                 <button id="evaluationMetricToggle" type="button" class="metric-dropdown-toggle" aria-haspopup="true" aria-expanded="false" aria-labelledby="evaluationMetricLabel evaluationMetricToggle" disabled>All metrics</button>
                 <div id="evaluationMetricMenu" class="metric-dropdown-menu" role="group" aria-labelledby="evaluationMetricLabel" hidden></div>
               </div>
             </div>
             <label class="toolbar-field speed-control" for="playbackRate">
-              Speed
+              <span data-i18n="replay.speed">Speed</span>
               <select id="playbackRate">
                 <option value="0.25">0.25x</option>
                 <option value="0.5">0.5x</option>
@@ -98,21 +105,21 @@
         <p id="poseOverlayStatus" class="overlay-status">Overlay hidden: run swing analysis to detect pose.</p>
 
         <div class="replay-actions">
-          <button id="previousFrameButton" type="button" class="secondary" disabled>Previous Frame</button>
-          <button id="nextFrameButton" type="button" class="secondary" disabled>Next Frame</button>
+          <button id="previousFrameButton" type="button" class="secondary" disabled data-i18n="replay.previous_frame">Previous Frame</button>
+          <button id="nextFrameButton" type="button" class="secondary" disabled data-i18n="replay.next_frame">Next Frame</button>
         </div>
 
         <dl class="file-details replay-details">
           <div>
-            <dt>Title</dt>
+            <dt data-i18n="common.title">Title</dt>
             <dd id="replayTitle">No video selected</dd>
           </div>
           <div>
-            <dt>Time</dt>
+            <dt data-i18n="common.time">Time</dt>
             <dd id="currentTime">0.00 / 0.00 s</dd>
           </div>
           <div>
-            <dt>Resolution</dt>
+            <dt data-i18n="common.resolution">Resolution</dt>
             <dd id="resolution">-</dd>
           </div>
           <div>
@@ -129,99 +136,99 @@
 
       <section class="analysis-panel review-column" aria-labelledby="analysis-title">
         <div class="section-heading">
-          <h2 id="analysis-title">Motion Analysis</h2>
-          <span>Video-driven</span>
+          <h2 id="analysis-title" data-i18n="analysis.title">Motion Analysis</h2>
+          <span data-i18n="analysis.video_driven">Video-driven</span>
         </div>
 
         <div class="analysis-controls">
           <label for="motionType">
-            Motion Type
+            <span data-i18n="analysis.motion_type">Motion Type</span>
             <select id="motionType">
-              <option value="swing" selected>Swing</option>
-              <option value="throwing">Throwing</option>
-              <option value="pitching">Pitching</option>
-              <option value="fielding">Fielding</option>
+              <option value="swing" selected data-i18n="motion.swing">Swing</option>
+              <option value="throwing" data-i18n="motion.throwing">Throwing</option>
+              <option value="pitching" data-i18n="motion.pitching">Pitching</option>
+              <option value="fielding" data-i18n="motion.fielding">Fielding</option>
             </select>
-            <span class="help-text">Swing is runnable now. Throwing, pitching, and fielding are planned analysis categories.</span>
+            <span class="help-text" data-i18n="analysis.motion_help">Swing is runnable now. Throwing, pitching, and fielding are planned analysis categories.</span>
           </label>
 
-          <div id="unsupportedMotionNotice" class="planned-motion" hidden>
+          <div id="unsupportedMotionNotice" class="planned-motion" hidden data-i18n="analysis.unsupported_motion">
             This motion type is planned but not implemented yet. Select Swing to run analysis.
           </div>
 
           <div id="swingSetupPanel" class="selected-motion-panel">
             <div class="motion-subheading">
-              <h3>Swing Analysis</h3>
+              <h3 data-i18n="swing.title">Swing Analysis</h3>
               <span id="swingAnalysisSource" class="analysis-source">No video selected</span>
             </div>
-            <p class="analysis-note">
+            <p class="analysis-note" data-i18n="swing.note">
               Runs from the selected stored video. The app samples frames, tracks player body pose with MediaPipe, detects swing events, and scores the motion.
             </p>
 
             <div class="analysis-input-grid">
               <label for="swingHandedness">
-                Handedness
+                <span data-i18n="swing.handedness">Handedness</span>
                 <select id="swingHandedness">
-                  <option value="right_handed" selected>Right-handed</option>
-                  <option value="left_handed">Left-handed</option>
-                  <option value="unknown">Unknown</option>
+                  <option value="right_handed" selected data-i18n="handedness.right_handed">Right-handed</option>
+                  <option value="left_handed" data-i18n="handedness.left_handed">Left-handed</option>
+                  <option value="unknown" data-i18n="common.unknown">Unknown</option>
                 </select>
-                <span class="help-text">Right-handed uses the left side as lead side; left-handed uses the right side. Unknown lowers confidence because a default side interpretation is used.</span>
+                <span class="help-text" data-i18n="swing.handedness_help">Right-handed uses the left side as lead side; left-handed uses the right side. Unknown lowers confidence because a default side interpretation is used.</span>
               </label>
 
               <label for="swingQualityMode">
-                Quality Mode
+                <span data-i18n="swing.quality_mode">Quality Mode</span>
                 <select id="swingQualityMode">
-                  <option value="higher_accuracy" selected>Higher accuracy</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="faster">Faster</option>
+                  <option value="higher_accuracy" selected data-i18n="quality.higher_accuracy">Higher accuracy</option>
+                  <option value="balanced" data-i18n="quality.balanced">Balanced</option>
+                  <option value="faster" data-i18n="quality.faster">Faster</option>
                 </select>
-                <span class="help-text">Higher accuracy samples more frames for fast swings. Faster mode reduces local runtime but can miss foot strike or estimated impact cues.</span>
+                <span class="help-text" data-i18n="swing.quality_help">Higher accuracy samples more frames for fast swings. Faster mode reduces local runtime but can miss foot strike or estimated impact cues.</span>
               </label>
             </div>
 
             <details class="advanced-controls">
-              <summary>Advanced Pose Debug</summary>
+              <summary data-i18n="swing.advanced_pose_debug">Advanced Pose Debug</summary>
               <div class="analysis-input-grid">
                 <label for="swingPoseMode">
-                  Pose Mode
+                  <span data-i18n="swing.pose_mode">Pose Mode</span>
                   <select id="swingPoseMode">
-                    <option value="normal" selected>Normal</option>
-                    <option value="notebook_parity">Single pose</option>
+                    <option value="normal" selected data-i18n="pose_mode.normal">Normal</option>
+                    <option value="notebook_parity" data-i18n="pose_mode.single_pose">Single pose</option>
                   </select>
-                  <span class="help-text">Single pose uses raw single-pose MediaPipe landmarks without temporal stabilization.</span>
+                  <span class="help-text" data-i18n="swing.pose_mode_help">Single pose uses raw single-pose MediaPipe landmarks without temporal stabilization.</span>
                 </label>
                 <label for="poseOverlaySource">
-                  Overlay Source
+                  <span data-i18n="swing.overlay_source">Overlay Source</span>
                   <select id="poseOverlaySource">
-                    <option value="stabilized" selected>Stabilized</option>
-                    <option value="raw">Raw</option>
+                    <option value="stabilized" selected data-i18n="overlay_source.stabilized">Stabilized</option>
+                    <option value="raw" data-i18n="overlay_source.raw">Raw</option>
                   </select>
-                  <span class="help-text">Raw overlay helps compare detector output with the stabilized analysis pose.</span>
+                  <span class="help-text" data-i18n="swing.overlay_source_help">Raw overlay helps compare detector output with the stabilized analysis pose.</span>
                 </label>
               </div>
             </details>
 
             <dl class="file-details analysis-selection">
               <div>
-                <dt>Selected Video</dt>
+                <dt data-i18n="analysis.selected_video">Selected Video</dt>
                 <dd id="analysisVideoTitle">No video selected</dd>
               </div>
               <div>
-                <dt>Pose</dt>
-                <dd>Detected locally from sampled video frames with MediaPipe body landmarks.</dd>
+                <dt data-i18n="analysis.pose">Pose</dt>
+                <dd data-i18n="analysis.pose_description">Detected locally from sampled video frames with MediaPipe body landmarks.</dd>
               </div>
               <div>
-                <dt>Events</dt>
-                <dd>Setup, stride, foot strike, impact, and follow-through are selected automatically.</dd>
+                <dt data-i18n="analysis.events">Events</dt>
+                <dd data-i18n="analysis.events_description">Setup, stride, foot strike, impact, and follow-through are selected automatically.</dd>
               </div>
             </dl>
 
             <div class="actions">
-              <button id="runSwingAnalysisButton" type="button" disabled>Run Swing Analysis</button>
-              <button id="clearSwingAnalysisButton" type="button" class="secondary">Clear Analysis</button>
+              <button id="runSwingAnalysisButton" type="button" disabled data-i18n="swing.run">Run Swing Analysis</button>
+              <button id="clearSwingAnalysisButton" type="button" class="secondary" data-i18n="swing.clear_analysis">Clear Analysis</button>
             </div>
-            <p class="help-text">Run samples the selected video, tracks MediaPipe body pose locally, detects swing events, and returns in-memory results. Clear removes results and overlays without deleting media.</p>
+            <p class="help-text" data-i18n="swing.run_help">Run samples the selected video, tracks MediaPipe body pose locally, detects swing events, and returns in-memory results. Clear removes results and overlays without deleting media.</p>
 
             <p id="swingAnalysisStatus" class="status-line" aria-live="polite">
               Select a stored video to run swing analysis.
@@ -233,50 +240,50 @@
         <div id="swingAnalysisResults" class="analysis-results" hidden>
           <div class="score-summary">
             <div>
-              <span class="score-label">Overall</span>
+              <span class="score-label" data-i18n="result.overall">Overall</span>
               <strong id="swingOverallScore">-</strong>
             </div>
             <div>
-              <span class="score-label">Confidence</span>
+              <span class="score-label" data-i18n="result.confidence">Confidence</span>
               <strong id="swingConfidence">-</strong>
-              <p class="help-text">Confidence reflects visible keypoint quality, handedness certainty, and phase detection certainty.</p>
+              <p class="help-text" data-i18n="result.confidence_help">Confidence reflects visible keypoint quality, handedness certainty, and phase detection certainty.</p>
             </div>
             <div>
-              <span class="score-label">Methodology</span>
+              <span class="score-label" data-i18n="result.methodology">Methodology</span>
               <strong id="swingMethodology">-</strong>
             </div>
           </div>
 
           <div class="analysis-block" aria-labelledby="swingFeedbackTitle">
-            <h3 id="swingFeedbackTitle">Feedback</h3>
+            <h3 id="swingFeedbackTitle" data-i18n="result.feedback">Feedback</h3>
             <p id="swingSummary"></p>
             <div class="result-columns">
               <div>
-                <h4>Good Points</h4>
+                <h4 data-i18n="result.good_points">Good Points</h4>
                 <ul id="swingGoodPoints"></ul>
               </div>
               <div>
-                <h4>Improvement Points</h4>
+                <h4 data-i18n="result.improvement_points">Improvement Points</h4>
                 <ul id="swingImprovementPoints"></ul>
               </div>
               <div>
-                <h4>Drills</h4>
+                <h4 data-i18n="result.drills">Drills</h4>
                 <ul id="swingDrills"></ul>
               </div>
             </div>
           </div>
 
           <div class="analysis-block" aria-labelledby="swingPhaseScoresTitle">
-            <h3 id="swingPhaseScoresTitle">Detected Events And Phase Scores</h3>
+            <h3 id="swingPhaseScoresTitle" data-i18n="result.events_scores">Detected Events And Phase Scores</h3>
             <ul id="swingEvents" class="event-list"></ul>
             <div class="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Phase</th>
-                    <th>Score</th>
-                    <th>Weight</th>
-                    <th>Score Confidence</th>
+                    <th data-i18n="table.phase">Phase</th>
+                    <th data-i18n="table.score">Score</th>
+                    <th data-i18n="table.weight">Weight</th>
+                    <th data-i18n="table.score_confidence">Score Confidence</th>
                   </tr>
                 </thead>
                 <tbody id="swingPhaseScores"></tbody>
@@ -285,18 +292,18 @@
           </div>
 
           <div class="analysis-block" aria-labelledby="swingMetricsTitle">
-            <h3 id="swingMetricsTitle">Metrics</h3>
+            <h3 id="swingMetricsTitle" data-i18n="result.metrics">Metrics</h3>
             <div class="table-scroll">
               <table class="metrics-table">
                 <thead>
                   <tr>
-                    <th>Metric</th>
-                    <th>Value</th>
-                    <th>Unit</th>
-                    <th>Target</th>
-                    <th>Severity</th>
-                    <th>Deduction</th>
-                    <th class="metrics-evidence-column">Evidence</th>
+                    <th data-i18n="table.metric">Metric</th>
+                    <th data-i18n="table.value">Value</th>
+                    <th data-i18n="table.unit">Unit</th>
+                    <th data-i18n="table.target">Target</th>
+                    <th data-i18n="table.severity">Severity</th>
+                    <th data-i18n="table.deduction">Deduction</th>
+                    <th class="metrics-evidence-column" data-i18n="table.evidence">Evidence</th>
                   </tr>
                 </thead>
                 <tbody id="swingMetrics"></tbody>
@@ -305,20 +312,20 @@
           </div>
 
           <div class="analysis-block" aria-labelledby="swingFaultsTitle">
-            <h3 id="swingFaultsTitle">Detected Faults</h3>
+            <h3 id="swingFaultsTitle" data-i18n="result.detected_faults">Detected Faults</h3>
             <div id="swingFaults"></div>
           </div>
 
           <details id="analysisDiagnostics" class="analysis-block diagnostics-panel">
-            <summary>Diagnostics</summary>
+            <summary data-i18n="result.diagnostics">Diagnostics</summary>
             <div class="diagnostics-content">
               <div aria-labelledby="swingLimitationsTitle">
-                <h4 id="swingLimitationsTitle">Limitations</h4>
-                <p class="help-text">Limitations identify sampling limits, missing keypoints, weak bat evidence, or 2D camera constraints.</p>
+                <h4 id="swingLimitationsTitle" data-i18n="result.limitations">Limitations</h4>
+                <p class="help-text" data-i18n="result.limitations_help">Limitations identify sampling limits, missing keypoints, weak bat evidence, or 2D camera constraints.</p>
                 <ul id="swingLimitations"></ul>
               </div>
               <div aria-labelledby="swingPoseQualityTitle">
-                <h4 id="swingPoseQualityTitle">Pose Quality</h4>
+                <h4 id="swingPoseQualityTitle" data-i18n="result.pose_quality">Pose Quality</h4>
                 <dl id="swingPoseQuality" class="diagnostic-grid"></dl>
               </div>
             </div>

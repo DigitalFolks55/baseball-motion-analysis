@@ -22,6 +22,14 @@ Future targets may include web, iPhone, and Android applications, so the archite
 * Code, module names, class names, function names, and commit messages should use English.
 * Technical notes may use English.
 
+## UI Localization Policy
+
+* English UI is the default implementation target.
+* Japanese UI may be added later through localization/i18n.
+* Do not hard-code user-facing UI text inside domain logic or application services.
+* Keep UI strings isolated so future translation is straightforward.
+* Domain logic, analysis rules, storage, and services must stay language-independent.
+
 ## Development Principles
 
 1. Keep domain logic independent from UI.
