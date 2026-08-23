@@ -32,7 +32,12 @@ from baseball_motion_analysis.app.media_services import (
     create_video_library_application_service,
 )
 from baseball_motion_analysis.app.swing_services import SwingVideoAnalysisError
-from baseball_motion_analysis.motion import SwingHandedness, SwingPhase
+from baseball_motion_analysis.motion import (
+    SwingEventDetectionConfig,
+    SwingHandedness,
+    SwingImpactDetectionPolicy,
+    SwingPhase,
+)
 from baseball_motion_analysis.pose import (
     MediaPipePoseEstimatorConfig,
     Point2D,
@@ -97,6 +102,9 @@ def analyze_swing_from_video(
             sampling=_to_sampling_options(request_payload),
             pose_mode=request_payload.pose_mode,
             overlay_source=request_payload.overlay_source,
+            impact_detection_policy=_to_impact_detection_policy(
+                request_payload.impact_detection_policy
+            ),
         )
         response = _swing_video_service(request).analyze_video(app_request)
     except ValidationError as exc:
@@ -120,10 +128,15 @@ def _to_app_request(payload: SwingAnalysisRequestPayload) -> AnalyzeSwingRequest
             "Provide at least one pose frame for swing analysis.",
         )
 
+    handedness = _to_handedness(payload.handedness)
     return AnalyzeSwingRequest(
         frames=tuple(_to_pose_frame(frame) for frame in payload.frames),
-        handedness=_to_handedness(payload.handedness),
+        handedness=handedness,
         phase_frames=_to_phase_frames(payload.phase_frames),
+        event_config=SwingEventDetectionConfig(
+            impact_detection_policy=_to_impact_detection_policy(payload.impact_detection_policy),
+            handedness=handedness,
+        ),
         frame_width=payload.frame_width,
         frame_height=payload.frame_height,
     )
@@ -148,6 +161,9 @@ def _to_pose_frame(payload: PoseFramePayload) -> PoseFrame:
         keypoints[keypoint_name] = PoseKeypoint(
             point=Point2D(x=raw_keypoint.x, y=raw_keypoint.y),
             confidence=raw_keypoint.confidence,
+            interpolated=raw_keypoint.interpolated,
+            smoothed=raw_keypoint.smoothed,
+            out_of_frame=raw_keypoint.out_of_frame,
         )
 
     return PoseFrame(
@@ -165,6 +181,17 @@ def _to_handedness(value: str) -> SwingHandedness:
         raise SwingApiRequestError(
             "invalid_swing_handedness",
             f"Swing handedness must be one of: {allowed}.",
+        ) from exc
+
+
+def _to_impact_detection_policy(value: str) -> SwingImpactDetectionPolicy:
+    try:
+        return SwingImpactDetectionPolicy(value)
+    except ValueError as exc:
+        allowed = ", ".join(policy.value for policy in SwingImpactDetectionPolicy)
+        raise SwingApiRequestError(
+            "invalid_impact_detection_policy",
+            f"Impact detection policy must be one of: {allowed}.",
         ) from exc
 
 

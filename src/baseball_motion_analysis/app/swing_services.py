@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -20,7 +21,12 @@ from baseball_motion_analysis.feedback import SwingFeedbackReport, generate_swin
 from baseball_motion_analysis.motion import (
     BodySide,
     NormalizedBodySides,
+    SwingActiveWindowDiagnostics,
+    SwingEventDetectionConfig,
+    SwingEventStatus,
+    SwingFrameQualityDiagnostics,
     SwingHandedness,
+    SwingImpactDetectionPolicy,
     SwingMetricName,
     SwingPhase,
     SwingPhaseFrames,
@@ -77,6 +83,7 @@ class AnalyzeSwingRequest:
     handedness: SwingHandedness = SwingHandedness.UNKNOWN
     phase_frames: Mapping[SwingPhase, int] | None = None
     config: SwingAnalysisConfig | None = None
+    event_config: SwingEventDetectionConfig = field(default_factory=SwingEventDetectionConfig)
     frame_width: int | None = None
     frame_height: int | None = None
 
@@ -137,6 +144,9 @@ class AnalyzeSwingVideoRequest:
     sampling: SwingVideoSamplingOptions = field(default_factory=SwingVideoSamplingOptions)
     pose_mode: Literal["normal", "notebook_parity"] = "normal"
     overlay_source: Literal["stabilized", "raw"] = "stabilized"
+    impact_detection_policy: SwingImpactDetectionPolicy = (
+        SwingImpactDetectionPolicy.BODY_POSE_ESTIMATED
+    )
 
     def __post_init__(self) -> None:
         if self.pose_mode not in {"normal", "notebook_parity"}:
@@ -158,6 +168,10 @@ class SwingEventWindow:
     confidence: float
     label: str
     detection_method: str
+    status: SwingEventStatus = SwingEventStatus.DETECTED
+    fallback_reason: str | None = None
+    is_visible: bool = True
+    is_overlay_event: bool = True
 
 
 @dataclass(frozen=True)
@@ -213,6 +227,22 @@ class EvaluationOverlayLine:
 
 
 @dataclass(frozen=True)
+class SwingScoringEvidenceIssue:
+    """One swing metric whose evidence frames carry pose-quality concerns."""
+
+    metric_name: str
+    evidence_frames: tuple[int, ...]
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SwingScoringEvidenceDiagnostics:
+    """Summary of pose-quality concerns affecting scoring evidence."""
+
+    affected_metrics: tuple[SwingScoringEvidenceIssue, ...]
+
+
+@dataclass(frozen=True)
 class CachedPoseEstimation:
     """Cached pose frames with original limitations."""
 
@@ -260,6 +290,9 @@ class AnalyzeSwingVideoResponse:
     raw_pose_diagnostics: PoseQualityDiagnostics | None
     pose_debug_diagnostics: PoseDebugDiagnostics | None
     sampling_diagnostics: SwingVideoSamplingDiagnostics
+    frame_quality_diagnostics: SwingFrameQualityDiagnostics | None
+    active_window_diagnostics: SwingActiveWindowDiagnostics | None
+    scoring_evidence_diagnostics: SwingScoringEvidenceDiagnostics
 
 
 class SwingAnalysisApplicationService:
@@ -272,6 +305,7 @@ class SwingAnalysisApplicationService:
             handedness=request.handedness,
             phase_frames=request.phase_frames,
             config=request.config,
+            event_config=request.event_config,
             frame_width=request.frame_width,
             frame_height=request.frame_height,
         )
@@ -315,6 +349,10 @@ class SwingVideoAnalysisApplicationService:
             pose_frames,
             frame_width=pose_bundle.frame_width,
             frame_height=pose_bundle.frame_height,
+            event_config=SwingEventDetectionConfig(
+                impact_detection_policy=request.impact_detection_policy,
+                handedness=request.handedness,
+            ),
         )
         phase_frames = {
             SwingPhase.SETUP: phases.setup,
@@ -328,30 +366,47 @@ class SwingVideoAnalysisApplicationService:
                 frames=pose_frames,
                 handedness=request.handedness,
                 phase_frames=phase_frames,
+                event_config=SwingEventDetectionConfig(
+                    impact_detection_policy=request.impact_detection_policy,
+                    handedness=request.handedness,
+                ),
                 frame_width=pose_bundle.frame_width,
                 frame_height=pose_bundle.frame_height,
             )
         )
+        analysis = replace(
+            analysis_response.analysis,
+            phases=phases,
+            limitations=tuple(
+                dict.fromkeys((*analysis_response.analysis.limitations, *phases.limitations))
+            ),
+        )
+        feedback = generate_swing_feedback(analysis)
         events = _events_from_phases(phases)
         overlay_frames = _overlay_frames(pose_frames, events, source="stabilized")
         raw_overlay_frames = _overlay_frames(pose_bundle.raw_frames, events, source="raw")
         evaluation_overlay = build_evaluation_overlay_lines(
             pose_frames,
-            analysis_response.analysis,
+            analysis,
+        )
+        scoring_evidence_diagnostics = _scoring_evidence_diagnostics(
+            analysis,
+            pose_frames,
+            pose_bundle.raw_frames,
         )
         combined_limitations = tuple(
             dict.fromkeys(
                 (
                     *pose_bundle.limitations,
                     *phases.limitations,
-                    *analysis_response.analysis.limitations,
+                    *analysis.limitations,
                 )
             )
         )
 
         return AnalyzeSwingVideoResponse(
-            analysis=analysis_response.analysis,
-            feedback=analysis_response.feedback,
+            analysis=analysis,
+            feedback=feedback,
             pose_frames=pose_frames,
             raw_pose_frames=pose_bundle.raw_frames,
             events=events,
@@ -364,6 +419,9 @@ class SwingVideoAnalysisApplicationService:
             raw_pose_diagnostics=pose_bundle.raw_pose_diagnostics,
             pose_debug_diagnostics=pose_bundle.pose_debug_diagnostics,
             sampling_diagnostics=pose_bundle.sampling_diagnostics,
+            frame_quality_diagnostics=phases.frame_quality,
+            active_window_diagnostics=phases.active_window,
+            scoring_evidence_diagnostics=scoring_evidence_diagnostics,
         )
 
     def _pose_frames_for_video(
@@ -486,18 +544,26 @@ def _events_from_phases(phases: SwingPhaseFrames) -> tuple[SwingEventWindow, ...
         SwingPhase.IMPACT: "Impact",
         SwingPhase.FOLLOW_THROUGH: "Follow-through",
     }
-    return tuple(
-        SwingEventWindow(
-            phase=phase,
-            frame_index=phases.frame_index_for(phase),
-            start_frame_index=phases.frame_index_for(phase),
-            end_frame_index=phases.frame_index_for(phase),
-            confidence=phases.confidence_for(phase),
-            label=phase_labels[phase],
-            detection_method=phases.detection_method_for(phase),
+    events: list[SwingEventWindow] = []
+    for phase in SwingPhase:
+        status = phases.status_for(phase)
+        is_user_visible = status in {SwingEventStatus.DETECTED, SwingEventStatus.ESTIMATED}
+        events.append(
+            SwingEventWindow(
+                phase=phase,
+                frame_index=phases.frame_index_for(phase),
+                start_frame_index=phases.frame_index_for(phase),
+                end_frame_index=phases.frame_index_for(phase),
+                confidence=phases.confidence_for(phase),
+                label=phase_labels[phase],
+                detection_method=phases.detection_method_for(phase),
+                status=status,
+                fallback_reason=phases.fallback_reason_for(phase),
+                is_visible=is_user_visible,
+                is_overlay_event=is_user_visible,
+            )
         )
-        for phase in SwingPhase
-    )
+    return tuple(events)
 
 
 def _frame_sampling_options(
@@ -620,13 +686,84 @@ def _fallback_pose_debug_diagnostics(
     )
 
 
+def _scoring_evidence_diagnostics(
+    analysis: SwingAnalysisResult,
+    pose_frames: Sequence[PoseFrame],
+    raw_pose_frames: Sequence[PoseFrame],
+) -> SwingScoringEvidenceDiagnostics:
+    frame_by_index = {frame.frame_index: frame for frame in pose_frames}
+    raw_frame_by_index = {frame.frame_index: frame for frame in raw_pose_frames}
+    affected: list[SwingScoringEvidenceIssue] = []
+    for metric in analysis.metrics:
+        reasons: list[str] = []
+        for frame_index in metric.evidence_frames:
+            frame = frame_by_index.get(frame_index)
+            if frame is None:
+                reasons.append("evidence_frame_missing")
+                continue
+            keypoints = tuple(frame.keypoints.values())
+            if any(keypoint.interpolated for keypoint in keypoints):
+                reasons.append("interpolated_landmarks")
+            if any(keypoint.out_of_frame for keypoint in keypoints):
+                reasons.append("out_of_frame_landmarks")
+            if any(keypoint.confidence < 0.3 for keypoint in keypoints):
+                reasons.append("low_confidence_landmarks")
+            raw_frame = raw_frame_by_index.get(frame_index)
+            if raw_frame is not None and _max_pose_delta_ratio(raw_frame, frame) > 0.35:
+                reasons.append("large_stabilization_delta")
+        if metric.limitations:
+            reasons.append("metric_limitations")
+        if reasons:
+            affected.append(
+                SwingScoringEvidenceIssue(
+                    metric_name=metric.name.value,
+                    evidence_frames=metric.evidence_frames,
+                    reasons=tuple(dict.fromkeys(reasons)),
+                )
+            )
+    return SwingScoringEvidenceDiagnostics(affected_metrics=tuple(affected))
+
+
+def _max_pose_delta_ratio(raw_frame: PoseFrame, stabilized_frame: PoseFrame) -> float:
+    scale = _pose_frame_scale(raw_frame) or _pose_frame_scale(stabilized_frame) or 0.25
+    ratios = [
+        math.dist(
+            (raw_keypoint.point.x, raw_keypoint.point.y),
+            (stabilized_keypoint.point.x, stabilized_keypoint.point.y),
+        )
+        / max(scale, 0.01)
+        for name, stabilized_keypoint in stabilized_frame.keypoints.items()
+        if (raw_keypoint := raw_frame.keypoints.get(name)) is not None
+    ]
+    return max(ratios, default=0.0)
+
+
+def _pose_frame_scale(frame: PoseFrame) -> float | None:
+    left_shoulder = frame.keypoints.get(PoseKeypointName.LEFT_SHOULDER)
+    right_shoulder = frame.keypoints.get(PoseKeypointName.RIGHT_SHOULDER)
+    left_hip = frame.keypoints.get(PoseKeypointName.LEFT_HIP)
+    right_hip = frame.keypoints.get(PoseKeypointName.RIGHT_HIP)
+    if left_shoulder is None or right_shoulder is None or left_hip is None or right_hip is None:
+        return None
+    shoulder = Point2D(
+        x=(left_shoulder.point.x + right_shoulder.point.x) / 2.0,
+        y=(left_shoulder.point.y + right_shoulder.point.y) / 2.0,
+    )
+    hip = Point2D(
+        x=(left_hip.point.x + right_hip.point.x) / 2.0,
+        y=(left_hip.point.y + right_hip.point.y) / 2.0,
+    )
+    scale = math.dist((shoulder.x, shoulder.y), (hip.x, hip.y))
+    return scale if scale > 0.0 else None
+
+
 def _overlay_frames(
     pose_frames: Sequence[PoseFrame],
     events: Sequence[SwingEventWindow],
     *,
     source: Literal["stabilized", "raw"],
 ) -> tuple[PoseOverlayFrame, ...]:
-    event_indexes = {event.frame_index for event in events}
+    event_indexes = {event.frame_index for event in events if event.is_overlay_event}
     return tuple(
         PoseOverlayFrame(
             frame_index=frame.frame_index,

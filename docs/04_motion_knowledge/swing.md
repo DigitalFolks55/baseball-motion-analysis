@@ -62,6 +62,34 @@ Frame-level requirements:
 
 The swing is continuous, but the first evaluator should align frames to five phases.
 
+Before automatic phase alignment, stored-video analysis should distinguish body landmark
+quality from swing event quality:
+
+* Body landmark quality describes whether the visible frame contains enough reliable
+  head, torso, wrist, hip, knee, and ankle evidence for swing analysis.
+* Swing event quality describes whether the ordered pose sequence contains enough motion
+  cues to place setup, stride, foot strike, estimated impact, and follow-through.
+
+For video-driven analysis, weak body-pose frames may be ignored or down-weighted for
+phase detection while preserving their original frame indexes and timestamps for replay
+alignment. The app should report weak or rejected frame counts rather than hiding that
+uncertainty.
+
+The automatic path should detect an active swing window before selecting phases. This
+reduces the chance that long pre-swing stance time, walking, coach movement, or
+post-swing idle frames dominate impact or follow-through selection. Setup should still
+prefer the earliest stable high-quality stance evidence before the active window when it
+exists. If the first usable pose frame already shows motion, setup should be reported as
+uncertain rather than silently selecting a late frame. Stride should prioritize sustained
+lower-body onset instead of wrist waggle and should not collapse next to setup when
+enough sampled frames exist. When the lead leg visibly lifts, stride should align with
+that lead-leg lift state; no-stride hitters should be reported with lower-confidence
+fallback semantics. Foot strike should use the detected setup baseline and should depend
+on prior lead-leg lift/descent/plant evidence when visible, not a planted setup frame or
+later maximum displacement. Estimated impact should avoid hard late-frame bias, and
+follow-through should represent the first stable swing finish inside the active swing
+window plus a small buffer rather than unrelated idle/reset frames.
+
 ### 1. Setup / Stance
 
 Purpose: establish a balanced power position before movement.
@@ -112,6 +140,11 @@ Improvement indicators:
 * Head and torso rush forward early.
 * Hands drift forward with the stride instead of staying loaded.
 
+Implementation note: if the lead leg visibly lifts, the automatic detector should use
+lead ankle vertical lift from setup baseline, with lead knee lift/flexion as secondary
+evidence, and select the public stride frame at the visible leg-lift peak. If no lift is
+visible, lower-body load can be used only as a lower-confidence no-stride fallback.
+
 ### 3. Foot Strike / Foot Plant
 
 Purpose: transition from forward movement into rotation and energy transfer.
@@ -136,6 +169,12 @@ Improvement indicators:
 * Lead knee keeps collapsing after landing.
 * Pelvis and shoulders rotate with no visible timing lag.
 * Lead arm disconnects early, causing a wide door-swing path.
+
+Implementation note: foot strike should be searched after lead-leg lift/descent when
+that state is visible. A confident plant requires the lead foot to return near the
+setup/ground baseline and stabilize for a short window when frame density allows. If no
+prior leg lift is visible, foot strike should carry an explicit no-stride or sparse
+fallback reason.
 
 ### 4. Impact
 
@@ -166,6 +205,31 @@ Improvement indicators:
 * Head lunges outside the base.
 * Rear shoulder drops and attack angle becomes too steep upward.
 
+Implementation note: without bat/barrel and ball evidence, impact remains an estimated
+body-motion window. The current app can use wrist/grip velocity, acceleration or
+deceleration, contact-zone hand position, lead-side/body constraints, and rotation cues,
+but it must not claim exact bat-ball contact from body landmarks alone.
+
+The service boundary exposes three impact policies:
+
+* `body_pose_estimated`: default behavior; impact is estimated from body-pose motion
+  cues and marked as estimated.
+* `skip_without_ball`: impact is skipped when no ball/contact evidence is available;
+  this remains for explicit API compatibility and future advanced workflows.
+* `require_ball_contact`: impact is unavailable unless a future ball/contact detector
+  supplies evidence.
+
+The stricter policies do not add a ball detector. They prevent contact-dependent
+evaluation from being inferred from a body-pose proxy.
+
+The normal browser workflow does not expose an `Impact Detection` off/on control. It
+uses `body_pose_estimated` impact and labels impact as estimated, not confirmed contact.
+The detector should select impact after foot strike within the active swing window using
+wrist/grip motion transition, contact-zone hand position, lead-side bracing, and
+rotation cues. It should penalize early pre-contact frames and late finish-only frames.
+Explicit API callers can still request skipped impact; skipped impact should not be
+shown as a normal detected contact event or replay event label.
+
 ### 5. Follow-Through
 
 Purpose: decelerate smoothly while preserving swing direction and balance.
@@ -188,6 +252,11 @@ Improvement indicators:
 * Sudden posture loss after impact.
 * Early wrist roll or immediate pull-off.
 * Finish falls forward, backward, or off the side-view axis.
+
+Implementation note: follow-through should be bounded to the active swing window plus a
+small buffer. The detector should prefer the first finish frame after extension or
+rotation evidence and should penalize large whole-body translation, walking, or reset
+motion after the swing.
 
 ## Kinematic Metrics
 
@@ -611,10 +680,14 @@ DEV003-06 improves the practical quality of MediaPipe-driven analysis:
 * Pose observations are stabilized with outlier rejection, short-gap interpolation, and
   smoothing before automatic phase detection and scoring.
 * Automatic setup, stride, foot strike, estimated impact, and follow-through events are
-  selected from wrist/grip velocity, ankle movement, and hip/shoulder rotation cues
-  instead of evenly spaced frame positions in the normal path.
+  selected from stable pre-motion posture, lower-body load, lead-foot plant, constrained
+  body-motion contact-window cues, and post-impact extension/deceleration instead of
+  evenly spaced frame positions in the normal path.
+* DEV006-02 restored default MediaPipe candidate selection to the original best-scored
+  candidate behavior after the DEV006-01 switch holdback proved risky for pose quality.
+  Candidate switch rejection remains an explicit tuning option rather than the default.
 * Results expose sampling diagnostics, pose-quality diagnostics, and per-phase confidence
-  so low-quality results can explain likely causes.
+  plus fallback reasons so low-quality results can explain likely causes.
 
 DEV003-07 adds pose-parity diagnostics for cases where app overlays look worse than a
 notebook experiment:

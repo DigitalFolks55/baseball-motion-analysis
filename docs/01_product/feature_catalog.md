@@ -116,8 +116,20 @@ Current foundation:
 - Swing analysis now returns `methodology_version: swing_evaluation_v2`; v2 replaces the
   normal v1 checklist-style scoring semantics.
 - Swing phases can be provided by internal/test callers, while the normal automatic path
-  estimates setup, stride, foot strike, impact, and follow-through from wrist/grip
-  velocity, foot movement, and hip/shoulder rotation cues.
+  estimates setup, stride, foot strike, impact, and follow-through from baseball-motion
+  cues: stable pre-motion setup, lower-body stride/load, lead-foot plant, constrained
+  body-motion estimated impact, and post-impact extension.
+- Swing event detection exposes an impact-detection policy at the API/service boundary.
+  The normal browser workflow uses `body_pose_estimated`, keeps impact visible as an
+  estimated event, and does not expose a user-facing impact-off selector.
+  `skip_without_ball` and `require_ball_contact` remain compatibility policies for
+  explicit callers and future advanced workflows.
+- Event responses include per-event status (`detected`, `estimated`, `skipped`, or
+  `unavailable`) plus confidence, detection method, and fallback reason so skipped or
+  uncertain event frames are visible rather than treated as confirmed contact.
+- Event responses also identify whether an event should be shown in normal browser
+  results or replay event overlays. Explicit skipped-impact API calls retain skipped
+  metadata without becoming the product default.
 - Swing v2 metrics include normalized stance width, torso forward tilt, torso tilt
   preservation, grip loading vector, rear knee sway, head translation ratio, early
   connection angle, lead knee blocking, hip-shoulder separation timing, estimated attack
@@ -139,6 +151,9 @@ Current foundation:
   through application services and calls `SwingVideoAnalysisApplicationService`.
 - Swing analysis results are displayed locally with overall score, phase scores, metrics,
   detected faults, feedback, confidence, and limitations.
+- In the browser result layout, detected faults are shown immediately after feedback and
+  before the detected events and phase-score table so likely issues are visible before
+  event details.
 - The browser result view displays the returned methodology and metric units, while
   thresholds and baseball rules remain in domain services.
 - The revised browser UI keeps upload and the scrollable video library on the left,
@@ -166,6 +181,35 @@ Current foundation:
 - Results also include raw-vs-stabilized pose diagnostics, selected candidate indexes
   when available, MediaPipe running/processing mode, requested pose count, and
   stabilization-delta summaries.
+- Stored-video swing analysis classifies pose frames before phase detection, reports
+  weak/rejected frame counts, detects an active swing window to avoid idle lead-in or
+  post-swing sections, selects setup from stable pre-motion frames when available, and
+  exposes scoring-evidence diagnostics for metrics affected by low-confidence,
+  interpolated, out-of-frame, or heavily stabilized landmarks.
+- DEV006-03 further revises event semantics: setup prefers the earliest stable stance
+  frame, stride waits for sustained lower-body onset with separation from setup when
+  possible, foot strike prefers first sustained lead-foot plant instead of later maximum
+  displacement, and follow-through prefers the first stable finish/extension plateau
+  instead of unrelated late frames.
+- DEV006-04 adds an ordered swing-state event model for automatic detection. Stride now
+  prefers visible lead-leg lift peak when detected, uses lower-body load only as a
+  lower-confidence no-stride fallback, and passes the lead-leg state into foot-strike
+  detection so planted setup frames are not confidently treated as foot strike before a
+  prior leg lift. Follow-through search is bounded to the active swing window plus a
+  small buffer so idle/reset frames after the swing are less likely to be selected.
+- DEV006-06 restores body-pose estimated impact as the normal browser workflow and
+  removes the visible `Impact Detection` On/Off control. Impact quality is improved in
+  the motion domain instead of asking users to skip the event for no-ball videos.
+- DEV006-05 clarifies the no-ball path: skipped impact is suppressed from normal event
+  rows and event overlays rather than displayed as a low-confidence contact frame. Head
+  translation and follow-through posture/balance still run with documented no-ball
+  fallback anchors when sufficient pose evidence exists; contact-specific impact
+  metrics remain not evaluated.
+- MediaPipe multi-candidate diagnostics include candidate switch and ambiguity counts
+  when multiple pose candidates are available. DEV006-02 restored the default
+  best-scored candidate switching behavior because the DEV006-01 switch holdback could
+  reduce pose quality; switch rejection remains available only when an explicit positive
+  candidate switch margin is configured.
 - Limitations and pose quality remain available under a foldable diagnostics area at the
   bottom of motion analysis.
 - Detected-event rows label motion phase-detection confidence as `Event confidence`,
@@ -191,8 +235,16 @@ Current limitations:
 - MediaPipe detects player body landmarks only. It does not detect bat tip, bat barrel,
   or ball position; evaluation lines that would need bat evidence use lower-confidence
   grip-path fallback styling or are skipped when evidence is missing.
+- The impact policy compatibility path does not add ball or bat tracking. Explicit API
+  callers that request skipped or contact-required impact can still receive skipped or
+  unavailable metric status, but the browser uses the body-pose estimated impact path.
 - Automatic phase detection is motion-aware but still heuristic and not calibrated from a
   large real swing dataset.
+- Active swing window and estimated impact detection use body-pose motion cues only.
+  Impact is refined after foot strike using wrist/grip motion transition, contact-zone
+  hand position, lead-side bracing, and rotation cues. The app still does not confirm
+  exact bat-ball contact without future bat/ball evidence, and event rows expose
+  fallback reasons when the heuristic sequence had to be repaired or quality was weak.
 - Some v2 thresholds are provisional and configurable until validated against calibrated
   swing fixtures.
 - Report persistence is not implemented.

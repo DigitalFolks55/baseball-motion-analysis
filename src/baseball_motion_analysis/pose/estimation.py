@@ -69,6 +69,8 @@ class MediaPipePoseEstimatorConfig:
     outlier_distance_ratio: float = 0.75
     high_velocity_smoothing_limit_ratio: float = 0.8
     stabilization_delta_warning_ratio: float = 0.35
+    candidate_switch_margin: float = 0.0
+    candidate_ambiguity_margin: float = 0.08
     player_selection_strategy: Literal[
         "continuity_confidence_size",
         "confidence_size",
@@ -105,6 +107,12 @@ class MediaPipePoseEstimatorConfig:
             raise ValueError(msg)
         if self.stabilization_delta_warning_ratio <= 0:
             msg = "stabilization_delta_warning_ratio must be greater than 0"
+            raise ValueError(msg)
+        if self.candidate_switch_margin < 0:
+            msg = "candidate_switch_margin must be greater than or equal to 0"
+            raise ValueError(msg)
+        if self.candidate_ambiguity_margin < 0:
+            msg = "candidate_ambiguity_margin must be greater than or equal to 0"
             raise ValueError(msg)
 
     @classmethod
@@ -152,6 +160,8 @@ class PoseDebugDiagnostics:
     mean_stabilization_delta_ratio: float | None = None
     max_stabilization_delta_ratio: float | None = None
     stabilization_changed_keypoint_count: int = 0
+    candidate_switch_count: int = 0
+    candidate_ambiguity_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -255,7 +265,10 @@ class MediaPipePoseEstimator:
         detected_frame_count = 0
         previous_timestamp_ms = -1
         previous_pose_frame: PoseFrame | None = None
+        previous_candidate_index: int | None = None
         selected_candidate_indexes: list[int] = []
+        candidate_switch_count = 0
+        candidate_ambiguity_count = 0
 
         try:
             for sequence_index, frame in enumerate(frames):
@@ -272,11 +285,20 @@ class MediaPipePoseEstimator:
                         timestamp_seconds=frame.timestamp_seconds,
                         min_landmark_confidence=self._config.min_landmark_confidence,
                         previous_frame=previous_pose_frame,
+                        previous_candidate_index=previous_candidate_index,
                         config=self._config,
                     )
                 )
                 if selection.index >= 0:
+                    if (
+                        previous_candidate_index is not None
+                        and selection.index != previous_candidate_index
+                    ):
+                        candidate_switch_count += 1
                     selected_candidate_indexes.append(selection.index)
+                    previous_candidate_index = selection.index
+                if selection.ambiguous:
+                    candidate_ambiguity_count += 1
                 raw_pose_frames.append(pose_frame)
                 limitations.extend(frame_limitations)
                 if detected:
@@ -314,6 +336,8 @@ class MediaPipePoseEstimator:
             mean_stabilization_delta_ratio=stabilization_debug.mean_delta_ratio,
             max_stabilization_delta_ratio=stabilization_debug.max_delta_ratio,
             stabilization_changed_keypoint_count=stabilization_debug.changed_keypoint_count,
+            candidate_switch_count=candidate_switch_count,
+            candidate_ambiguity_count=candidate_ambiguity_count,
         )
         limitations.extend(postprocess_limitations)
         if (
@@ -608,6 +632,8 @@ class PoseCandidateSelection:
     landmarks: Sequence[Any]
     index: int
     score: float
+    score_margin: float | None = None
+    ambiguous: bool = False
 
 
 def _pose_frame_from_mediapipe_result_with_selection(
@@ -617,6 +643,7 @@ def _pose_frame_from_mediapipe_result_with_selection(
     timestamp_seconds: float | None,
     min_landmark_confidence: float = 0.3,
     previous_frame: PoseFrame | None = None,
+    previous_candidate_index: int | None = None,
     config: MediaPipePoseEstimatorConfig | None = None,
 ) -> tuple[PoseFrame, tuple[str, ...], bool, PoseCandidateSelection]:
     """Convert one MediaPipe result and retain candidate-selection diagnostics."""
@@ -635,6 +662,7 @@ def _pose_frame_from_mediapipe_result_with_selection(
     selection = select_best_pose_landmarks_with_diagnostics(
         pose_landmarks,
         previous_frame=previous_frame,
+        previous_candidate_index=previous_candidate_index,
         config=selection_config,
     )
     landmarks = selection.landmarks
@@ -695,12 +723,14 @@ def select_best_pose_landmarks(
     pose_landmarks: Sequence[Sequence[Any]],
     *,
     previous_frame: PoseFrame | None = None,
+    previous_candidate_index: int | None = None,
     config: MediaPipePoseEstimatorConfig | None = None,
 ) -> Sequence[Any]:
     """Select the most likely player from MediaPipe pose candidates."""
     return select_best_pose_landmarks_with_diagnostics(
         pose_landmarks,
         previous_frame=previous_frame,
+        previous_candidate_index=previous_candidate_index,
         config=config,
     ).landmarks
 
@@ -709,26 +739,61 @@ def select_best_pose_landmarks_with_diagnostics(
     pose_landmarks: Sequence[Sequence[Any]],
     *,
     previous_frame: PoseFrame | None = None,
+    previous_candidate_index: int | None = None,
     config: MediaPipePoseEstimatorConfig | None = None,
 ) -> PoseCandidateSelection:
     """Select the most likely player and keep the selected candidate index."""
     if not pose_landmarks:
         return PoseCandidateSelection(landmarks=(), index=-1, score=0.0)
     selection_config = config or MediaPipePoseEstimatorConfig()
-    scored = tuple(
+    scored = sorted(
         (
-            index,
-            landmarks,
-            _pose_selection_score(
+            (
+                index,
                 landmarks,
-                previous_frame=previous_frame,
-                config=selection_config,
-            ),
-        )
-        for index, landmarks in enumerate(pose_landmarks)
+                _pose_selection_score(
+                    landmarks,
+                    previous_frame=previous_frame,
+                    config=selection_config,
+                ),
+            )
+            for index, landmarks in enumerate(pose_landmarks)
+        ),
+        key=lambda item: item[2],
+        reverse=True,
     )
-    index, landmarks, score = max(scored, key=lambda item: item[2])
-    return PoseCandidateSelection(landmarks=landmarks, index=index, score=score)
+    index, landmarks, score = scored[0]
+    score_margin = score - scored[1][2] if len(scored) > 1 else None
+    ambiguous = (
+        score_margin is not None and score_margin <= selection_config.candidate_ambiguity_margin
+    )
+    if (
+        selection_config.candidate_switch_margin > 0.0
+        and previous_candidate_index is not None
+        and 0 <= previous_candidate_index < len(pose_landmarks)
+        and previous_candidate_index != index
+        and previous_frame is not None
+        and previous_frame.keypoints
+        and selection_config.player_selection_strategy == "continuity_confidence_size"
+    ):
+        previous_score = next(
+            candidate_score
+            for candidate_index, _candidate_landmarks, candidate_score in scored
+            if candidate_index == previous_candidate_index
+        )
+        if score < previous_score + selection_config.candidate_switch_margin:
+            index = previous_candidate_index
+            landmarks = pose_landmarks[previous_candidate_index]
+            score = previous_score
+            score_margin = scored[0][2] - previous_score
+            ambiguous = True
+    return PoseCandidateSelection(
+        landmarks=landmarks,
+        index=index,
+        score=score,
+        score_margin=score_margin,
+        ambiguous=ambiguous,
+    )
 
 
 def _pose_selection_score(
@@ -1102,7 +1167,18 @@ def _should_skip_smoothing_for_fast_keypoint(
         PoseKeypointName.LEFT_ANKLE,
         PoseKeypointName.RIGHT_ANKLE,
     }
-    if name not in fast_keypoints or index <= 0 or index >= len(frames) - 1:
+    moderate_keypoints = {
+        PoseKeypointName.LEFT_ELBOW,
+        PoseKeypointName.RIGHT_ELBOW,
+        PoseKeypointName.LEFT_KNEE,
+        PoseKeypointName.RIGHT_KNEE,
+    }
+    if (
+        name not in fast_keypoints
+        and name not in moderate_keypoints
+        or index <= 0
+        or index >= len(frames) - 1
+    ):
         return False
     previous = frames[index - 1].keypoints.get(name)
     current = frames[index].keypoints.get(name)
@@ -1115,7 +1191,12 @@ def _should_skip_smoothing_for_fast_keypoint(
         or _pose_frame_body_scale(frames[index + 1])
         or 0.25
     )
-    threshold = max(0.01, scale * config.high_velocity_smoothing_limit_ratio)
+    multiplier = config.high_velocity_smoothing_limit_ratio
+    if name in fast_keypoints:
+        multiplier = min(multiplier, 0.45)
+    elif name in moderate_keypoints:
+        multiplier = min(multiplier, 0.65)
+    threshold = max(0.01, scale * multiplier)
     return (
         _keypoint_distance(previous, current) > threshold
         or _keypoint_distance(current, next_keypoint) > threshold

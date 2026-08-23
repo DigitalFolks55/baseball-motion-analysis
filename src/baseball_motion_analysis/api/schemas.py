@@ -13,10 +13,17 @@ from baseball_motion_analysis.app.swing_services import (
     EvaluationOverlayLine,
     PoseOverlayFrame,
     SwingEventWindow,
+    SwingScoringEvidenceDiagnostics,
+    SwingScoringEvidenceIssue,
     SwingVideoSamplingDiagnostics,
 )
 from baseball_motion_analysis.feedback import SwingFeedbackReport
-from baseball_motion_analysis.motion import SwingPhase, SwingPhaseFrames
+from baseball_motion_analysis.motion import (
+    SwingActiveWindowDiagnostics,
+    SwingFrameQualityDiagnostics,
+    SwingPhase,
+    SwingPhaseFrames,
+)
 from baseball_motion_analysis.pose import PoseDebugDiagnostics, PoseFrame, PoseQualityDiagnostics
 from baseball_motion_analysis.storage.models import MediaRecord, VideoReplayManifest
 
@@ -139,6 +146,11 @@ class SwingAnalysisRequestPayload(BaseModel):
     frames: list[PoseFramePayload]
     handedness: str = "unknown"
     phase_frames: dict[str, int] | None = None
+    impact_detection_policy: Literal[
+        "body_pose_estimated",
+        "require_ball_contact",
+        "skip_without_ball",
+    ] = "body_pose_estimated"
     frame_width: int | None = None
     frame_height: int | None = None
 
@@ -155,6 +167,8 @@ class SwingPhaseFramesResponse(BaseModel):
     limitations: tuple[str, ...]
     phase_confidences: dict[str, float]
     detection_methods: dict[str, str]
+    fallback_reasons: dict[str, str | None]
+    event_statuses: dict[str, str]
 
     @classmethod
     def from_phases(cls, phases: SwingPhaseFrames) -> SwingPhaseFramesResponse:
@@ -171,6 +185,10 @@ class SwingPhaseFramesResponse(BaseModel):
             detection_methods={
                 phase.value: phases.detection_method_for(phase) for phase in SwingPhase
             },
+            fallback_reasons={
+                phase.value: phases.fallback_reason_for(phase) for phase in SwingPhase
+            },
+            event_statuses={phase.value: phases.status_for(phase).value for phase in SwingPhase},
         )
 
 
@@ -323,6 +341,11 @@ class SwingVideoAnalysisRequestPayload(BaseModel):
     sampling: SwingVideoSamplingRequest | None = None
     pose_mode: Literal["normal", "notebook_parity"] = "normal"
     overlay_source: Literal["stabilized", "raw"] = "stabilized"
+    impact_detection_policy: Literal[
+        "body_pose_estimated",
+        "require_ball_contact",
+        "skip_without_ball",
+    ] = "body_pose_estimated"
 
 
 class SwingEventResponse(BaseModel):
@@ -335,6 +358,10 @@ class SwingEventResponse(BaseModel):
     confidence: float
     label: str
     detection_method: str
+    status: str
+    fallback_reason: str | None = None
+    is_visible: bool = True
+    is_overlay_event: bool = True
 
     @classmethod
     def from_event(cls, event: SwingEventWindow) -> SwingEventResponse:
@@ -347,6 +374,10 @@ class SwingEventResponse(BaseModel):
             confidence=event.confidence,
             label=event.label,
             detection_method=event.detection_method,
+            status=event.status.value,
+            fallback_reason=event.fallback_reason,
+            is_visible=event.is_visible,
+            is_overlay_event=event.is_overlay_event,
         )
 
 
@@ -547,6 +578,8 @@ class PoseDebugDiagnosticsResponse(BaseModel):
     mean_stabilization_delta_ratio: float | None
     max_stabilization_delta_ratio: float | None
     stabilization_changed_keypoint_count: int
+    candidate_switch_count: int
+    candidate_ambiguity_count: int
 
     @classmethod
     def from_diagnostics(cls, diagnostics: PoseDebugDiagnostics) -> PoseDebugDiagnosticsResponse:
@@ -560,6 +593,99 @@ class PoseDebugDiagnosticsResponse(BaseModel):
             mean_stabilization_delta_ratio=diagnostics.mean_stabilization_delta_ratio,
             max_stabilization_delta_ratio=diagnostics.max_stabilization_delta_ratio,
             stabilization_changed_keypoint_count=diagnostics.stabilization_changed_keypoint_count,
+            candidate_switch_count=diagnostics.candidate_switch_count,
+            candidate_ambiguity_count=diagnostics.candidate_ambiguity_count,
+        )
+
+
+class SwingFrameQualityDiagnosticsResponse(BaseModel):
+    """Browser-safe swing frame-quality diagnostics."""
+
+    total_frame_count: int
+    usable_frame_count: int
+    weak_frame_count: int
+    rejected_frame_count: int
+    weak_frame_indexes: tuple[int, ...]
+    rejected_frame_indexes: tuple[int, ...]
+    reasons_by_frame: dict[int, tuple[str, ...]]
+
+    @classmethod
+    def from_diagnostics(
+        cls,
+        diagnostics: SwingFrameQualityDiagnostics,
+    ) -> SwingFrameQualityDiagnosticsResponse:
+        """Create a public response from frame-quality diagnostics."""
+        return cls(
+            total_frame_count=diagnostics.total_frame_count,
+            usable_frame_count=diagnostics.usable_frame_count,
+            weak_frame_count=diagnostics.weak_frame_count,
+            rejected_frame_count=diagnostics.rejected_frame_count,
+            weak_frame_indexes=diagnostics.weak_frame_indexes,
+            rejected_frame_indexes=diagnostics.rejected_frame_indexes,
+            reasons_by_frame=dict(diagnostics.reasons_by_frame),
+        )
+
+
+class SwingActiveWindowDiagnosticsResponse(BaseModel):
+    """Browser-safe active swing window diagnostics."""
+
+    start_frame_index: int
+    end_frame_index: int
+    peak_motion_frame_index: int
+    confidence: float
+    fallback_reason: str | None
+
+    @classmethod
+    def from_diagnostics(
+        cls,
+        diagnostics: SwingActiveWindowDiagnostics,
+    ) -> SwingActiveWindowDiagnosticsResponse:
+        """Create a public response from active swing window diagnostics."""
+        return cls(
+            start_frame_index=diagnostics.start_frame_index,
+            end_frame_index=diagnostics.end_frame_index,
+            peak_motion_frame_index=diagnostics.peak_motion_frame_index,
+            confidence=diagnostics.confidence,
+            fallback_reason=diagnostics.fallback_reason,
+        )
+
+
+class SwingScoringEvidenceIssueResponse(BaseModel):
+    """Browser-safe scoring evidence issue."""
+
+    metric_name: str
+    evidence_frames: tuple[int, ...]
+    reasons: tuple[str, ...]
+
+    @classmethod
+    def from_issue(
+        cls,
+        issue: SwingScoringEvidenceIssue,
+    ) -> SwingScoringEvidenceIssueResponse:
+        """Create a public response from one scoring evidence issue."""
+        return cls(
+            metric_name=issue.metric_name,
+            evidence_frames=issue.evidence_frames,
+            reasons=issue.reasons,
+        )
+
+
+class SwingScoringEvidenceDiagnosticsResponse(BaseModel):
+    """Browser-safe scoring evidence diagnostics."""
+
+    affected_metrics: tuple[SwingScoringEvidenceIssueResponse, ...]
+
+    @classmethod
+    def from_diagnostics(
+        cls,
+        diagnostics: SwingScoringEvidenceDiagnostics,
+    ) -> SwingScoringEvidenceDiagnosticsResponse:
+        """Create a public response from scoring evidence diagnostics."""
+        return cls(
+            affected_metrics=tuple(
+                SwingScoringEvidenceIssueResponse.from_issue(issue)
+                for issue in diagnostics.affected_metrics
+            )
         )
 
 
@@ -580,6 +706,9 @@ class SwingVideoAnalysisResponse(BaseModel):
     raw_pose_diagnostics: PoseQualityDiagnosticsResponse | None
     pose_debug_diagnostics: PoseDebugDiagnosticsResponse | None
     sampling_diagnostics: SwingVideoSamplingDiagnosticsResponse
+    frame_quality_diagnostics: SwingFrameQualityDiagnosticsResponse | None
+    active_window_diagnostics: SwingActiveWindowDiagnosticsResponse | None
+    scoring_evidence_diagnostics: SwingScoringEvidenceDiagnosticsResponse
 
     @classmethod
     def from_response(cls, response: AnalyzeSwingVideoResponse) -> SwingVideoAnalysisResponse:
@@ -623,5 +752,24 @@ class SwingVideoAnalysisResponse(BaseModel):
             ),
             sampling_diagnostics=SwingVideoSamplingDiagnosticsResponse.from_diagnostics(
                 response.sampling_diagnostics
+            ),
+            frame_quality_diagnostics=(
+                SwingFrameQualityDiagnosticsResponse.from_diagnostics(
+                    response.frame_quality_diagnostics
+                )
+                if response.frame_quality_diagnostics is not None
+                else None
+            ),
+            active_window_diagnostics=(
+                SwingActiveWindowDiagnosticsResponse.from_diagnostics(
+                    response.active_window_diagnostics
+                )
+                if response.active_window_diagnostics is not None
+                else None
+            ),
+            scoring_evidence_diagnostics=(
+                SwingScoringEvidenceDiagnosticsResponse.from_diagnostics(
+                    response.scoring_evidence_diagnostics
+                )
             ),
         )

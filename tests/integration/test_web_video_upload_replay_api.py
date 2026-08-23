@@ -65,11 +65,17 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "Diagnostics" in page.text
     assert "Pose Quality" in page.text
     assert '<details id="analysisDiagnostics"' in page.text
+    assert page.text.index("Feedback") < page.text.index("Detected Faults")
+    assert page.text.index("Detected Faults") < page.text.index("Detected Events And Phase Scores")
     assert page.text.index("Diagnostics") > page.text.index("Detected Faults")
     assert page.text.index("Limitations") > page.text.index("Diagnostics")
     assert page.text.index("Pose Quality") > page.text.index("Limitations")
     assert "Run Swing Analysis" in page.text
     assert "Clear Analysis" in page.text
+    assert "swingImpactPolicy" not in page.text
+    assert "Impact Detection" not in page.text
+    assert '<option value="skip_without_ball" selected' not in page.text
+    assert '<option value="body_pose_estimated"' not in page.text
     assert "poseOverlayCanvas" in page.text
     assert "Replay" in page.text
     assert "Use Default Swing Pose" not in page.text
@@ -81,6 +87,14 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "pose_mode" in script.text
     assert "pose_mode: swingPoseMode.value" in script.text
     assert "overlay_source" in script.text
+    assert "impact_detection_policy" in script.text
+    assert 'const estimatedImpactPolicy = "body_pose_estimated";' in script.text
+    assert "impact_detection_policy: estimatedImpactPolicy" in script.text
+    assert "swingImpactPolicy.value" not in script.text
+    assert 'swingImpactPolicy.addEventListener("change"' not in script.text
+    assert "event.is_visible !== false" in script.text
+    assert '"impact_detection.off": "Off"' not in script.text
+    assert '"impact_detection.on": "On"' not in script.text
     assert "analysisRawOverlayFrames" in script.text
     assert "analysisEvaluationOverlay" in script.text
     assert "evaluation_overlay" in script.text
@@ -112,6 +126,10 @@ def test_web_ui_and_static_assets_are_available(tmp_path: Path) -> None:
     assert "localizedImprovementPoints" in script.text
     assert "localStorage.setItem(languageStorageKey, currentLanguage)" in script.text
     assert "renderPoseQuality" in script.text
+    assert "active_window" in script.text
+    assert "frame_quality" in script.text
+    assert "candidate_switches" in script.text
+    assert "scoring_evidence" in script.text
     assert "videoContentRect" in script.text
     assert "renderSwingVideoAnalysis" in script.text
     assert "swingMethodology" in script.text

@@ -14,7 +14,13 @@ from baseball_motion_analysis.app.swing_services import (
     SwingVideoAnalysisApplicationService,
     SwingVideoAnalysisError,
 )
-from baseball_motion_analysis.motion import SwingHandedness, SwingMetricName
+from baseball_motion_analysis.motion import (
+    SwingEventStatus,
+    SwingHandedness,
+    SwingImpactDetectionPolicy,
+    SwingMetricName,
+    SwingPhase,
+)
 from baseball_motion_analysis.pose import (
     PoseDebugDiagnostics,
     PoseEstimationResult,
@@ -106,10 +112,19 @@ def test_swing_video_analysis_application_service_estimates_pose_and_reuses_cach
     assert first_response.pose_debug_diagnostics is not None
     assert first_response.pose_diagnostics.detected_pose_frame_ratio == 1.0
     assert first_response.pose_debug_diagnostics.selected_candidate_indexes == (0,)
+    assert first_response.pose_debug_diagnostics.candidate_switch_count == 0
+    assert first_response.frame_quality_diagnostics is not None
+    assert first_response.frame_quality_diagnostics.total_frame_count == 7
+    assert first_response.active_window_diagnostics is not None
+    assert first_response.active_window_diagnostics.peak_motion_frame_index >= 0
+    assert first_response.scoring_evidence_diagnostics is not None
+    assert isinstance(first_response.scoring_evidence_diagnostics.affected_metrics, tuple)
     assert first_response.sampling_diagnostics.quality_mode == "higher_accuracy"
     assert first_response.sampling_diagnostics.full_frame_sampling is True
     assert first_response.sampling_diagnostics.sampled_frame_count == 7
     assert all(event.detection_method for event in first_response.events)
+    assert all(event.is_visible for event in first_response.events)
+    assert all(event.is_overlay_event for event in first_response.events)
     assert second_response.pose_cache_hit is True
     assert pose_estimator.calls == 1
     assert all(
@@ -162,6 +177,66 @@ def test_swing_video_analysis_uses_media_dimensions_for_aspect_aware_metrics(
     assert stance.value == pytest.approx(1.0264)
     assert torso_tilt.value == pytest.approx(30.0)
     assert response.evaluation_overlay
+
+
+def test_swing_video_analysis_can_skip_impact_without_ball_contact(
+    tmp_path: Path,
+) -> None:
+    library_service = _video_library_service(tmp_path)
+    video_path = _create_tiny_video(tmp_path / "skip-impact.avi", frame_count=7, fps=10.0)
+    staging_path = library_service.create_staging_file(".avi")
+    staging_path.write_bytes(video_path.read_bytes())
+    record = library_service.import_video(
+        ImportVideoRequest(
+            staging_path=staging_path,
+            display_name="skip-impact.avi",
+            file_size_bytes=staging_path.stat().st_size,
+        )
+    )
+    service = SwingVideoAnalysisApplicationService(
+        video_library_service=library_service,
+        pose_estimator=RecordingBodyPoseEstimator(),
+    )
+
+    response = service.analyze_video(
+        AnalyzeSwingVideoRequest(
+            media_id=record.media_id,
+            handedness=SwingHandedness.RIGHT_HANDED,
+            impact_detection_policy=SwingImpactDetectionPolicy.SKIP_WITHOUT_BALL,
+        )
+    )
+
+    impact_event = next(event for event in response.events if event.phase == SwingPhase.IMPACT)
+    impact_metric = next(
+        metric
+        for metric in response.analysis.metrics
+        if metric.name == SwingMetricName.ESTIMATED_ATTACK_ANGLE
+    )
+    head_metric = next(
+        metric
+        for metric in response.analysis.metrics
+        if metric.name == SwingMetricName.HEAD_TRANSLATION_RATIO
+    )
+    follow_metric = next(
+        metric
+        for metric in response.analysis.metrics
+        if metric.name == SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE
+    )
+
+    assert impact_event.status == SwingEventStatus.SKIPPED
+    assert impact_event.is_visible is False
+    assert impact_event.is_overlay_event is False
+    assert not any(
+        frame.frame_index == impact_event.frame_index and frame.is_event_frame
+        for frame in response.overlay_frames
+    )
+    assert response.analysis.phases.status_for(SwingPhase.IMPACT) == SwingEventStatus.SKIPPED
+    assert impact_metric.value is None
+    assert head_metric.value is not None
+    assert follow_metric.value is not None
+    assert any("no-ball fallback anchor" in limitation for limitation in head_metric.limitations)
+    assert any("no-ball fallback anchor" in limitation for limitation in follow_metric.limitations)
+    assert response.feedback.limitations
 
 
 def test_swing_video_analysis_default_estimator_requires_mediapipe_model_path(
