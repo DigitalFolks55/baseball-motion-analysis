@@ -166,6 +166,71 @@ def test_first_frame_pose_selection_prefers_centered_plausible_player_over_edge_
     assert selection.landmarks is tracked_player
 
 
+def test_candidate_selection_rejects_weak_track_switch() -> None:
+    previous = PoseFrame(
+        frame_index=0,
+        timestamp_seconds=0.0,
+        keypoints={
+            PoseKeypointName.NOSE: PoseKeypoint(Point2D(0.5, 0.2), confidence=0.9),
+            PoseKeypointName.LEFT_SHOULDER: PoseKeypoint(Point2D(0.4, 0.35), confidence=0.9),
+            PoseKeypointName.RIGHT_SHOULDER: PoseKeypoint(Point2D(0.6, 0.35), confidence=0.9),
+        },
+    )
+    tracked_player = _landmarks(confidence=0.72)
+    tempting_switch = _landmarks(confidence=0.78)
+    for landmark in tempting_switch:
+        landmark.x += 0.18
+
+    selection = select_best_pose_landmarks_with_diagnostics(
+        [tracked_player, tempting_switch],
+        previous_frame=previous,
+        previous_candidate_index=0,
+        config=MediaPipePoseEstimatorConfig(candidate_switch_margin=0.25),
+    )
+
+    assert selection.index == 0
+    assert selection.score > 0.0
+
+
+def test_candidate_selection_default_matches_original_best_score_switching() -> None:
+    previous = PoseFrame(
+        frame_index=0,
+        timestamp_seconds=0.0,
+        keypoints={
+            PoseKeypointName.NOSE: PoseKeypoint(Point2D(0.5, 0.2), confidence=0.9),
+            PoseKeypointName.LEFT_SHOULDER: PoseKeypoint(Point2D(0.4, 0.35), confidence=0.9),
+            PoseKeypointName.RIGHT_SHOULDER: PoseKeypoint(Point2D(0.6, 0.35), confidence=0.9),
+        },
+    )
+    tracked_player = _landmarks(confidence=0.72)
+    better_candidate = _landmarks(confidence=0.95)
+
+    selection = select_best_pose_landmarks_with_diagnostics(
+        [tracked_player, better_candidate],
+        previous_frame=previous,
+        previous_candidate_index=0,
+        config=MediaPipePoseEstimatorConfig(),
+    )
+
+    assert selection.index == 1
+    assert selection.landmarks is better_candidate
+
+
+def test_candidate_selection_reports_ambiguity_for_close_candidates() -> None:
+    first = _landmarks(confidence=0.8)
+    second = _landmarks(confidence=0.81)
+    for landmark in second:
+        landmark.x += 0.01
+
+    selection = select_best_pose_landmarks_with_diagnostics(
+        [first, second],
+        config=MediaPipePoseEstimatorConfig(candidate_ambiguity_margin=0.2),
+    )
+
+    assert selection.score_margin is not None
+    assert selection.ambiguous is True
+
+
 def test_stabilize_pose_frames_rejects_outlier_interpolates_gap_and_reports_diagnostics() -> None:
     frames = (
         _pose_frame_with_left_wrist(0, 0.4),
@@ -210,6 +275,28 @@ def test_smoothing_does_not_over_smooth_high_velocity_wrist_motion() -> None:
     assert middle_wrist.point.x == 0.8
     assert middle_wrist.smoothed is False
     assert diagnostics.interpolated_frame_count == 0
+
+
+def test_smoothing_preserves_high_velocity_ankle_motion() -> None:
+    frames = (
+        _pose_frame_with_left_ankle(0, 0.4),
+        _pose_frame_with_left_ankle(1, 0.7),
+        _pose_frame_with_left_ankle(2, 1.0),
+    )
+
+    stabilized, _limitations, _diagnostics = stabilize_pose_frames(
+        frames,
+        MediaPipePoseEstimatorConfig(
+            smoothing_window=3,
+            max_interpolation_gap_frames=0,
+            outlier_rejection_enabled=False,
+            high_velocity_smoothing_limit_ratio=0.8,
+        ),
+    )
+
+    middle_ankle = stabilized[1].keypoints[PoseKeypointName.LEFT_ANKLE]
+    assert middle_ankle.point.x == 0.7
+    assert middle_ankle.smoothed is False
 
 
 def test_mediapipe_pose_estimator_tracks_each_sampled_frame_with_injected_landmarker() -> None:
@@ -372,4 +459,19 @@ def _pose_frame_with_left_wrist(frame_index: int, wrist_x: float) -> PoseFrame:
         frame_index=frame_index,
         timestamp_seconds=frame_index / 30.0,
         keypoints=base,
+    )
+
+
+def _pose_frame_with_left_ankle(frame_index: int, ankle_x: float) -> PoseFrame:
+    base = _pose_frame_with_left_wrist(frame_index, 0.4).keypoints
+    return PoseFrame(
+        frame_index=frame_index,
+        timestamp_seconds=frame_index / 10,
+        keypoints={
+            **base,
+            PoseKeypointName.LEFT_ANKLE: PoseKeypoint(
+                Point2D(ankle_x, 0.96),
+                confidence=0.9,
+            ),
+        },
     )

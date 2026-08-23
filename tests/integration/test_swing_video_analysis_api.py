@@ -68,11 +68,24 @@ def test_swing_video_analysis_endpoint_returns_events_overlay_and_cached_pose(
     }
     assert first_payload["analysis"]["phases"]["phase_confidences"]["impact"] > 0
     assert first_payload["analysis"]["phases"]["detection_methods"]["impact"]
+    assert first_payload["analysis"]["phases"]["event_statuses"]["impact"] == "estimated"
+    assert (
+        next(event for event in first_payload["events"] if event["phase"] == "impact")["status"]
+        == "estimated"
+    )
+    assert all(event["is_visible"] for event in first_payload["events"])
+    assert all(event["is_overlay_event"] for event in first_payload["events"])
     assert first_payload["pose_diagnostics"]["detected_pose_frame_ratio"] == 1.0
     assert first_payload["raw_pose_diagnostics"]["detected_pose_frame_ratio"] == 1.0
     assert first_payload["pose_debug_diagnostics"]["running_mode"] == "video"
     assert first_payload["pose_debug_diagnostics"]["requested_num_poses"] == 1
     assert first_payload["pose_debug_diagnostics"]["selected_candidate_indexes"] == [0]
+    assert first_payload["pose_debug_diagnostics"]["candidate_switch_count"] == 0
+    assert first_payload["pose_debug_diagnostics"]["candidate_ambiguity_count"] == 0
+    assert first_payload["frame_quality_diagnostics"]["total_frame_count"] == 8
+    assert first_payload["frame_quality_diagnostics"]["usable_frame_count"] >= 1
+    assert first_payload["active_window_diagnostics"]["peak_motion_frame_index"] >= 0
+    assert "affected_metrics" in first_payload["scoring_evidence_diagnostics"]
     assert first_payload["sampling_diagnostics"]["quality_mode"] == "higher_accuracy"
     assert first_payload["sampling_diagnostics"]["sampled_frame_count"] == 8
     assert first_payload["sampling_diagnostics"]["full_frame_sampling"] is True
@@ -112,6 +125,72 @@ def test_swing_video_analysis_endpoint_returns_events_overlay_and_cached_pose(
 
     assert second_response.status_code == 200
     assert second_response.json()["pose_cache_hit"] is True
+
+
+def test_swing_video_analysis_endpoint_can_skip_impact_without_ball_contact(
+    tmp_path: Path,
+) -> None:
+    app = _create_test_app(tmp_path)
+    client = TestClient(app)
+    video_path = _create_tiny_video(tmp_path / "skip-impact-session.avi", frame_count=8, fps=10.0)
+    upload_response = client.post(
+        "/api/v1/media/videos",
+        files={
+            "file": (
+                "skip-impact-session.avi",
+                video_path.read_bytes(),
+                "video/x-msvideo",
+            )
+        },
+    )
+    app.state.swing_video_analysis_service = SwingVideoAnalysisApplicationService(
+        video_library_service=app.state.video_library_service,
+        pose_estimator=BodyOnlyPoseEstimator(),
+    )
+
+    response = client.post(
+        "/api/v1/analysis/swing/video",
+        json={
+            "media_id": upload_response.json()["media_id"],
+            "handedness": "right_handed",
+            "impact_detection_policy": "skip_without_ball",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["analysis"]["phases"]["event_statuses"]["impact"] == "skipped"
+    impact_event = next(event for event in payload["events"] if event["phase"] == "impact")
+    assert impact_event["status"] == "skipped"
+    assert impact_event["is_visible"] is False
+    assert impact_event["is_overlay_event"] is False
+    assert not any(
+        frame["frame_index"] == impact_event["frame_index"] and frame["is_event_frame"]
+        for frame in payload["overlay"]
+    )
+    attack_metric = next(
+        metric
+        for metric in payload["analysis"]["metrics"]
+        if metric["name"] == "estimated_attack_angle"
+    )
+    head_metric = next(
+        metric
+        for metric in payload["analysis"]["metrics"]
+        if metric["name"] == "head_translation_ratio"
+    )
+    follow_metric = next(
+        metric
+        for metric in payload["analysis"]["metrics"]
+        if metric["name"] == "follow_through_posture_balance"
+    )
+    assert attack_metric["severity"] == "not_evaluated"
+    assert attack_metric["value"] is None
+    assert head_metric["severity"] != "not_evaluated"
+    assert follow_metric["severity"] != "not_evaluated"
+    assert any("no-ball fallback anchor" in limitation for limitation in head_metric["limitations"])
+    assert any(
+        "no-ball fallback anchor" in limitation for limitation in follow_metric["limitations"]
+    )
 
 
 def test_swing_video_analysis_endpoint_rejects_invalid_media_id(tmp_path: Path) -> None:

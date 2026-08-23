@@ -91,6 +91,11 @@ using MediaPipe body landmarks. The app requests one MediaPipe pose by default f
 ordinary single-player swing clips. If `BMA_MEDIAPIPE_NUM_POSES` is raised for crowded
 clips, the pose module selects the likely hitter by continuity from the previous frame,
 then landmark confidence, visible body size, center preference, and in-frame evidence.
+The diagnostics include candidate switch and ambiguity counts when multiple candidates
+are available, which helps explain cases where the overlay may jump between people.
+By default the app uses the best-scored candidate, matching the original behavior before
+DEV006-01. Candidate-switch rejection is only applied when an explicit positive switch
+margin is configured for diagnostic tuning.
 
 Real video analysis requires a local MediaPipe Pose Landmarker `.task` model path:
 
@@ -133,6 +138,19 @@ Choose a swing analysis quality mode:
 - `Faster`: reduces local runtime but can miss foot strike, estimated impact, or quick
   hand movement.
 
+### Estimated Impact
+
+The normal browser workflow always uses body-pose estimated impact. The impact event is
+shown as an estimated swing event, not confirmed bat-ball contact. The detector chooses
+impact after foot strike inside the active swing window using wrist/grip motion,
+contact-zone hand position, lead-side bracing, rotation cues, and transition toward
+follow-through. If those cues are weak, the report includes a lower-confidence fallback
+reason.
+
+The backend still accepts skipped or contact-required impact policies for compatibility
+and future advanced workflows, but the local browser UI does not expose an
+`Impact Detection` off/on selector.
+
 ### Advanced Pose Debug
 
 The advanced pose debug controls are for diagnosis when app overlay quality differs from
@@ -153,8 +171,23 @@ frame alignment, or browser drawing.
 
 Setup, stride, foot strike, impact, and follow-through are selected automatically from
 the ordered pose sequence. The user does not enter phase frame indexes in the UI. Impact
-is an estimated impact window from body-pose motion cues; exact ball contact is not
-claimed unless future bat or ball detection supplies that evidence.
+is an estimated impact window from body-pose motion cues in the default policy; exact
+ball contact is not claimed unless future bat or ball detection supplies that evidence.
+
+Current event selection uses:
+
+- `Setup`: earliest stable high-quality stance before the active swing window when
+  available.
+- `Stride`: visible lead-leg lift peak when the lead leg lifts. If no leg lift is
+  visible, lower-body load is used only as a lower-confidence no-stride fallback.
+- `Foot Strike`: first stable lead-foot plant after prior leg lift/descent when visible.
+  If no prior leg lift is visible or the sample is sparse, the event carries a lower
+  confidence fallback reason.
+- `Impact`: constrained body-motion contact-window cues after foot strike. The heuristic
+  favors contact-zone hand position, wrist/grip speed transition, lead-side bracing, and
+  rotation evidence, and penalizes early pre-contact frames or late finish-only frames.
+- `Follow-through`: first stable swing finish/extension plateau inside the active swing
+  window plus a small buffer, not just the next frame or unrelated idle/reset frames.
 
 ## Run Analysis
 
@@ -176,8 +209,14 @@ The application service:
   smoothing.
 - Reuses in-memory cached pose results for repeated runs with the same media ID and
   sampling options.
-- Automatically selects swing event frames from wrist/grip velocity, foot movement, and
-  hip/shoulder rotation cues.
+- Automatically selects swing event frames from stable pre-motion posture, lead-leg lift
+  or no-stride load fallback, lead-foot descent/plant, estimated impact cues, and
+  bounded follow-through finish.
+- Classifies pose frames before phase detection, detects the active swing window, and
+  avoids using weak or rejected pose frames as primary phase evidence when possible.
+- Estimates impact from a constrained body-motion window using wrist/grip motion,
+  acceleration/deceleration, contact-zone hand position, and rotation cues. It still
+  does not claim exact bat-ball contact without future bat or ball evidence.
 - Runs the existing swing scoring and feedback service.
 - Runs the v2 baseline swing scoring and feedback service.
 - Supplies the stored video width and height to v2 swing scoring so geometric metrics
@@ -204,21 +243,27 @@ Results appear in the `Motion Analysis` panel.
 - `Good Points`: visible strengths detected from pose data.
 - `Improvement Points`: likely areas to improve.
 - `Drills`: suggested practice actions tied to detected swing faults.
-- `Detected Events And Phase Scores`: automatically selected setup, stride, foot strike,
-  impact, and follow-through event frames plus event confidence, detection method, phase
-  scoring, and score confidence. Event confidence comes from motion phase detection;
-  score confidence comes from the pose/keypoint evidence used by phase scoring.
-- `Metrics`: v2 measured values, units, target ranges, severity, deductions, and
-  evidence frames.
 - `Detected Faults`: fault candidates, affected phases, severity, evidence, and evidence
   frames.
+- `Detected Events And Phase Scores`: automatically selected setup, stride, foot strike,
+  impact, and follow-through event frames plus event confidence, detection method, phase
+  scoring, score confidence, and fallback reason when event ordering or quality is weak.
+  Event confidence comes from motion phase detection; score confidence comes from the
+  pose/keypoint evidence used by phase scoring. Impact is shown as estimated in normal
+  browser results because ball/contact evidence is not detected.
+- `Metrics`: v2 measured values, units, target ranges, severity, deductions, and
+  evidence frames. Explicit advanced API requests that skip or require contact evidence
+  can still mark contact-specific metrics as `Not evaluated`, but that is not the normal
+  browser workflow.
 - `Diagnostics`: a foldable section at the bottom of motion analysis. It contains:
   `Limitations` for sampling limits, missing or low-confidence MediaPipe landmarks,
   missing bat evidence, fallback event detection, or 2D camera constraints; and
   `Pose Quality` for effective FPS, sampled frame count, pose detection ratio, required
   landmark coverage, mean/min confidence, smoothed frames, interpolated frames, rejected
   outliers, raw pose coverage, requested pose count, selected candidate indexes,
-  processing mode, and stabilization deltas.
+  candidate switch/ambiguity counts, processing mode, stabilization deltas, swing
+  frame-quality counts, active swing window range, peak motion frame, and the number of
+  metrics with pose-quality concerns in their scoring evidence.
 
 Feedback is cautious. Treat it as a local rule-based review aid, not a medical diagnosis
 or guaranteed coaching truth.

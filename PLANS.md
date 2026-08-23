@@ -1269,6 +1269,460 @@ DEV005-01 final-review-planning result:
   * `uv run pytest`
 * No release or deployment was created.
 
+DEV006-01 enhanced pose estimation planning scope:
+
+* Improve video-driven swing pose reliability without changing the local-PC-first
+  service boundary or adding hosted processing.
+* Add pose-quality frame classification before automatic phase detection and scoring.
+* Add active swing window detection so idle lead-in and post-swing frames do not dominate
+  setup, impact, or follow-through selection.
+* Improve estimated impact selection with body-motion constraints beyond raw wrist
+  velocity while continuing to report that bat/ball contact is not detected.
+* Improve player tracking diagnostics for multi-candidate MediaPipe output, including
+  candidate switches and ambiguity counts.
+* Make stabilization safer for high-speed wrist and ankle motion and expose when
+  selected evidence depends on interpolated or heavily adjusted landmarks.
+* Return structured diagnostics through the application service and API while keeping UI
+  diagnostics compact and rule-free.
+
+DEV006-01 non-goals:
+
+* Hosted services, cloud uploads, release/deployment work, Docker, PyPI publishing,
+  committed MediaPipe model files, committed user videos, generated reports, bat/ball
+  detector implementation, throwing/pitching/fielding analysis, or persistent
+  pose/result caching.
+
+DEV006-01 acceptance criteria:
+
+* Pose-quality filtering or weighting is implemented before automatic phase detection.
+* Active swing window detection narrows phase selection for videos with idle lead-in or
+  post-swing frames.
+* Player tracking reports candidate switches and ambiguity when multiple candidates are
+  available.
+* Impact estimation uses additional constraints beyond raw wrist velocity and remains
+  clearly labeled as estimated body-motion evidence.
+* API responses include structured diagnostics for pose quality, active window, player
+  tracking, phase confidence, and scoring evidence limitations.
+* UI diagnostics remain compact and do not contain baseball thresholds.
+* Deterministic unit and integration tests cover the new behavior.
+* Product, architecture, motion-knowledge, manual, development-log, and planning docs are
+  updated where behavior changes.
+* Required quality commands pass and final planning review has no blocking issue.
+
+DEV006-01 final-review-planning result:
+
+* Stored-video swing analysis now classifies pose frames before automatic phase
+  detection and returns frame-quality diagnostics with usable, weak, and rejected counts.
+* Automatic phase detection now uses an active swing window before selecting setup,
+  stride, foot strike, estimated impact, and follow-through frames.
+* Estimated impact selection uses a constrained body-motion window with wrist/grip
+  motion, acceleration/deceleration, grip-forward position, and rotation cues while
+  continuing to report that bat/ball contact is not detected.
+* MediaPipe multi-candidate debug output now includes candidate switch and ambiguity
+  counts, and candidate selection can reject weak track switches.
+* Stabilization preserves high-speed wrist and ankle motion more conservatively.
+* API responses include frame-quality diagnostics, active-window diagnostics, and
+  scoring-evidence diagnostics. The browser renders compact diagnostic counts and frame
+  ranges without owning thresholds or scoring rules.
+* Product, architecture, ADR, motion-knowledge, manual, development-log, and planning
+  docs are updated.
+* Required quality commands passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 99 tests and one existing Starlette/httpx deprecation warning.
+* No release or deployment was created.
+* Remaining risks are non-blocking follow-up work: bat/ball/contact detection, calibrated
+  annotated swing fixtures, camera-angle suitability scoring, and persistent pose/result
+  caching.
+
+DEV006-02 enhanced pose estimation v2 planning scope:
+
+* Audit DEV006-01 pose-estimation changes against the original pre-DEV006 behavior and
+  keep only changes with deterministic evidence.
+* Revert default candidate-switch holdback to the original best-score selection behavior
+  when the holdback can reduce pose quality; keep switch rejection only as explicit
+  opt-in tuning.
+* Retain confirmed stabilization improvements that preserve high-speed wrist and ankle
+  landmarks from smoothing.
+* Revise automatic swing event detection separately from body-pose estimation.
+* Select setup from stable pre-motion frames before the active swing window when
+  available.
+* Select stride from lower-body and body-load cues instead of wrist movement alone.
+* Select foot strike from quality-accepted frames using the detected setup baseline and
+  lead-foot plant/stabilization cues after stride.
+* Select estimated impact from constrained body-motion evidence without a hard late-frame
+  bias, and continue to report that exact bat/ball contact is not detected.
+* Select follow-through from meaningful post-impact extension/deceleration rather than a
+  trivial next-frame fallback.
+* Preserve existing service/API boundaries and expose confidence plus fallback reasons
+  for weak or repaired event selections.
+
+DEV006-02 non-goals:
+
+* Hosted services, cloud upload, release/deployment work, Docker, PyPI publishing,
+  committed MediaPipe model files, committed user videos, generated reports, bat/ball
+  detector implementation, throwing/pitching/fielding analysis, or broad swing scoring
+  redesign.
+
+DEV006-02 acceptance criteria:
+
+* A/B audit behavior is documented, including which DEV006-01 pose-estimation changes
+  were reverted, retained, or revised.
+* Default pose candidate selection no longer rejects a better-scored candidate unless an
+  explicit positive switch margin is configured.
+* Event detection no longer selects setup only from an active swing window, foot strike
+  from rejected frames, foot strike from the wrong baseline, impact from hard late bias,
+  or follow-through as a trivial next-frame fallback.
+* Deterministic tests cover the revised event-detection failure modes and pose A/B
+  behavior.
+* Product, architecture, motion-knowledge, manual, development-log, and planning docs are
+  updated where behavior changes.
+* Required quality commands pass and final planning review has no blocking issue.
+
+DEV006-02 final-review-planning result:
+
+* A/B pose review completed: default candidate selection was reverted to original
+  best-scored behavior by using a `0.0` switch margin, while explicit positive
+  candidate-switch margins still enable opt-in switch rejection.
+* Confirmed high-speed wrist and ankle smoothing preservation remains in place with
+  deterministic tests.
+* Event detection now selects setup from stable pre-motion frames when available, stride
+  from lower-body load, foot strike from detected setup baseline and lead-foot plant
+  cues, estimated impact without a hard late-frame bias, and follow-through from
+  post-impact extension/deceleration.
+* Ordering repair now happens in quality-candidate frame space before mapping back to
+  original frame indexes, preventing repaired phases from landing on rejected frames.
+* Application/API/UI diagnostics expose fallback reasons for repaired or weak event
+  selections.
+* Product, architecture, ADR, motion-knowledge, manual, development-log, and planning
+  docs are updated.
+* Required quality commands passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 103 tests and one existing Starlette/httpx deprecation warning.
+* No release or deployment was created.
+* Remaining risks are non-blocking follow-up work: calibrated real-swing event fixtures,
+  bat/ball/contact detection, and camera-angle suitability scoring.
+
+DEV006-03 enhanced pose estimation v2 planning scope:
+
+* Improve swing event detection semantics after user review found setup, foot strike,
+  and follow-through can still drift late.
+* Add a typed impact-detection policy with `body_pose_estimated`,
+  `require_ball_contact`, and `skip_without_ball` behavior.
+* Keep current runnable behavior as the default `body_pose_estimated` policy.
+* Represent unavailable or skipped impact explicitly through event status, confidence,
+  detection method, and fallback reason without requiring ball/contact detection.
+* Revise setup to prefer the earliest stable high-quality stance frame instead of a
+  late frame selected relative to active-window start.
+* Revise stride to detect lower-body onset with minimum separation from setup when
+  enough sampled frames exist.
+* Revise foot strike to prefer the first sustained lead-foot plant over later maximum
+  displacement.
+* Revise follow-through to prefer the first stable finish/extension plateau over
+  unrelated late frames.
+* Skip or visibly downgrade impact-dependent metrics when the selected impact policy
+  does not allow body-pose estimated impact.
+
+DEV006-03 non-goals:
+
+* Ball, bat, barrel, or contact detector implementation; hosted services; cloud upload;
+  telemetry; release/deployment work; Docker; PyPI publishing; mobile adapters;
+  fielding/throwing/pitching changes; committed model files; committed user videos; or
+  heavy binary fixtures.
+
+DEV006-03 acceptance criteria:
+
+* Setup no longer drifts late when early stable stance frames are available.
+* Stride no longer becomes trivially adjacent to setup when enough sampled frames exist.
+* Impact policy is configurable through app/API request paths and does not invent
+  contact when ball/contact evidence is required or skipped.
+* Foot strike prefers first sustained plant over later maximum displacement.
+* Follow-through prefers first stable finish/extension plateau over unrelated late
+  frames.
+* Event confidence, status, and fallback reasons are explicit for uncertain or skipped
+  events.
+* Impact-dependent metrics handle unavailable impact safely and visibly.
+* Deterministic unit and integration tests cover the revised behavior.
+* Relevant docs are updated and required quality commands pass.
+
+DEV006-03 enhanced event detection final-review-planning result:
+
+* The requested `docs/99_prompts/DEV006-03_Enhance_pose_estimations_v3.md` file was
+  not present in the repository; the available DEV006-03 prompt document was
+  `docs/99_prompts/DEV006-03_Enhance_pose_estimations_v2.md`, which captured the same
+  user findings and was used as the implementation specification.
+* Added typed swing impact-detection policy and per-event status metadata. The default
+  remains body-pose estimated impact, while `skip_without_ball` and
+  `require_ball_contact` explicitly mark impact skipped or unavailable and set impact
+  confidence to zero.
+* Revised automatic event selection so setup biases to the earliest stable stance,
+  stride requires lower-body onset separation when enough frames exist, foot strike
+  prefers first sustained lead-foot plant, and follow-through prefers the first stable
+  finish/extension plateau.
+* Impact-dependent metrics are marked not evaluated when impact is skipped or
+  unavailable, and impact-phase faults are suppressed instead of using a proxy frame as
+  contact evidence.
+* App/API/UI paths expose the impact policy and return event statuses, fallback reasons,
+  and phase status mappings without adding any ball/contact detector.
+* Deterministic unit, app-service, API, and static UI tests cover revised event status,
+  skipped impact scoring, stride separation, and browser request fields.
+* No release or deployment work was performed.
+
+DEV006-04 enhanced pose estimation v4 planning scope:
+
+* Revise automatic swing event detection from mostly independent candidate scoring to a
+  small ordered state model inside the `motion` module:
+  setup -> lead-leg lift/stride -> foot descent -> foot strike/plant -> optional impact
+  -> follow-through finish.
+* Add explicit lead-leg lift evidence so the public `stride` frame can align with a
+  visible leg-up frame when present. Use no-stride lower-body load only as a documented
+  lower-confidence fallback.
+* Make foot strike depend on prior lead-leg lift or documented no-stride fallback, so a
+  planted setup frame is not confidently treated as foot strike before the leg has lifted.
+* Add a visible browser `Impact Detection` on/off control. `On` maps to
+  `body_pose_estimated`; `Off` maps to `skip_without_ball`. Keep backend/API policy
+  compatibility and avoid adding ball/contact detection.
+* Bound follow-through search to the active swing window plus a small buffer and prefer
+  the first swing-related finish frame after extension/rotation plateau, not idle or
+  reset frames after the swing.
+* Preserve local-PC-first service boundaries: motion owns event semantics, app
+  orchestrates defaults, API serializes request/response models, and UI only renders
+  controls and returned metadata.
+
+DEV006-04 non-goals:
+
+* Ball, bat, barrel, or contact detector implementation; broad swing scoring redesign;
+  fielding/throwing/pitching changes; hosted services; cloud upload; telemetry;
+  release/deployment work; Docker; PyPI publishing; mobile adapters; committed model
+  files; committed user videos; generated reports; or heavy binary fixtures.
+
+DEV006-04 acceptance criteria:
+
+* Stride can align with visible lead-leg lift instead of earlier unrelated movement.
+* Foot strike is not confidently selected before prior lead-leg lift or a documented
+  no-stride fallback.
+* Browser UI has a clear impact detection enable/disable control, and changing it clears
+  stale analysis.
+* Disabling impact maps to skipped impact behavior and prevents impact-dependent scoring
+  from using a proxy contact frame.
+* Follow-through represents swing finish/end and avoids idle or reset frames after the
+  swing.
+* Event confidence, status, detection method, and fallback reason remain visible through
+  app/API/UI responses.
+* Deterministic unit and integration tests cover the revised behavior.
+* Relevant docs are updated and required quality gates pass.
+
+DEV006-04 enhanced event detection final-review-planning result:
+
+* Implemented internal lead-leg lift analysis in the `motion` module. Automatic stride
+  now uses visible lead-leg lift peak when present and labels no-lift cases as
+  lower-confidence no-stride lower-body-load fallback.
+* Foot strike now consumes the lead-leg lift state and is confident only after
+  lift/descent/plant evidence, or it reports no-stride/sparse fallback reasons.
+* Follow-through search is bounded by the active swing window plus a small buffer and
+  penalizes large post-swing body translation, reducing idle/reset frame selection.
+* App/API paths pass known handedness into `SwingEventDetectionConfig` while preserving
+  existing request compatibility.
+* The browser UI now exposes a visible `Impact Detection` On/Off control. Off maps to
+  `skip_without_ball` and is the browser default for no-ball review; On maps to
+  `body_pose_estimated`. Changing it clears stale results.
+* Added deterministic motion-unit and static UI tests for leg-lift stride, no-stride
+  fallback, foot-strike dependency on prior lift, bounded follow-through, impact control
+  payload, and stale-result clearing.
+* Required quality gates passed: JS syntax, Ruff, Ruff format check, mypy, and full
+  pytest.
+* No release or deployment work was performed.
+
+DEV006-05 enhanced pose estimation v5 planning scope:
+
+* Revise the impact-off product contract so `Impact Detection: Off` suppresses impact
+  from normal user-visible event rows and replay event overlays while preserving
+  internal phase status metadata for compatibility.
+* Keep impact-phase faults and truly contact-dependent metrics skipped when impact is
+  skipped or unavailable.
+* Restore useful no-ball metric feedback for non-contact measurements. Head translation
+  uses a setup-to-foot-strike fallback, and follow-through posture/balance uses a
+  foot-strike-to-finish fallback with explicit limitations and lower confidence.
+* Distinguish event-detection confidence, score/evaluation confidence, skipped event
+  status, and not-evaluated metrics so skipped impact is not presented as a detected
+  event with poor confidence.
+* Calibrate no-leg-lift stride fallback confidence so valid no-stride swings are marked
+  limited without being automatically pinned near poor-confidence values.
+
+DEV006-05 non-goals:
+
+* Ball, bat, barrel, or contact detector implementation; broad scoring threshold
+  redesign; fielding/throwing/pitching changes; hosted services; cloud upload;
+  telemetry; release/deployment work; Docker; PyPI publishing; mobile adapters;
+  committed model files; committed user videos; generated reports; or heavy binary
+  fixtures.
+
+DEV006-05 acceptance criteria:
+
+* Turning impact detection off removes or suppresses impact from normal user-visible
+  event evaluation and replay overlays.
+* Skipped impact is shown as skipped through metadata and not as a detected event with
+  0% confidence in the browser event list.
+* Impact faults remain suppressed when impact is skipped.
+* Head translation and follow-through posture/balance remain evaluated with documented
+  no-ball fallback anchors when sufficient pose evidence exists.
+* Truly contact-dependent metrics remain not evaluated when impact is skipped.
+* Follow-through score confidence is not forced to 0% solely because impact detection is
+  off.
+* Stride fallback confidence is calibrated so valid no-stride swings are limited but not
+  automatically poor.
+* Deterministic unit, app-service, API, and static UI tests cover the revised behavior.
+
+DEV006-05 enhanced event display/scoring final-review-planning result:
+
+* Added app/API event display metadata so skipped or unavailable impact can remain in
+  phase status diagnostics without appearing as a normal browser event row or replay
+  event label.
+* Updated overlay event-frame generation and browser rendering to use the visibility
+  metadata. In no-ball mode, skipped impact is not shown as a low-confidence detected
+  event.
+* Restored no-ball fallback evaluation for selected non-contact metrics:
+  `HEAD_TRANSLATION_RATIO` uses setup-to-foot-strike evidence, and
+  `FOLLOW_THROUGH_POSTURE_BALANCE` uses foot-strike-to-finish evidence with lower
+  confidence and explicit limitations.
+* Contact-specific impact metrics and impact-phase faults remain suppressed when impact
+  is skipped or unavailable.
+* Calibrated no-leg-lift stride fallback confidence so valid no-stride swings are
+  limited without being automatically pinned near poor-confidence values.
+* Added deterministic unit, app-service, API, and static UI tests for event visibility,
+  overlay suppression, no-ball metric restoration, follow-through score confidence, and
+  stride fallback calibration.
+* Required quality gates passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 113 tests and one existing Starlette/httpx deprecation
+  warning.
+* No release or deployment work was performed.
+
+DEV006-06 impact-estimation restoration and quality planning scope:
+
+* Revert the normal browser workflow away from user-facing skipped-impact evaluation.
+  Standard swing analysis should always request body-pose-estimated impact and should
+  show impact as an estimated swing event instead of asking users to disable it.
+* Preserve the `skip_without_ball` backend/API policy only as a compatibility and future
+  advanced mode. It must not be the default or exposed in the normal local web UI.
+* Improve body-pose-estimated impact selection quality by choosing impact after
+  foot-strike within the active swing, using contact-zone hand position, wrist/grip
+  speed transition, lead-side bracing, and rotation evidence while penalizing early
+  pre-contact and late follow-through-only frames.
+* Keep confidence semantics clear: event confidence expresses detector evidence,
+  scoring confidence expresses available metric evidence, and overall confidence must
+  not be depressed by a skipped-impact path in the normal browser workflow.
+* Update tests and documentation so impact-off behavior is not presented as the normal
+  product contract, while explicit API compatibility remains covered.
+
+DEV006-06 non-goals:
+
+* Ball, bat, barrel, or contact detector implementation; release/deployment work;
+  broad scoring threshold redesign; fielding/throwing/pitching changes; cloud upload;
+  telemetry; Docker; PyPI publishing; mobile adapters; committed model files; committed
+  user videos; generated reports; or heavy binary fixtures.
+
+DEV006-06 acceptance criteria:
+
+* The normal browser analysis path sends `body_pose_estimated` impact and no longer
+  displays an impact-detection off/on selector.
+* Impact remains visible as an estimated event row and replay overlay in normal browser
+  results.
+* Explicit API calls that request skipped impact continue to return compatible skipped
+  metadata without becoming the product default.
+* Estimated impact is selected after foot strike and before finish/follow-through when
+  pose evidence supports that ordering.
+* Estimated impact is not pulled to early wrist-only movement before contact-zone
+  evidence or to late finish-only movement after the swing has passed contact.
+* Confidence and limitation metadata report weak estimated-impact evidence without
+  treating normal impact as skipped.
+* Deterministic unit, app-service, API, and static UI tests cover the restored default
+  behavior and revised impact heuristic.
+
+DEV006-06 impact-estimation restoration and quality final-review-planning result:
+
+* Removed the normal browser `Impact Detection` off/on selector. Browser swing video
+  analysis now sends `body_pose_estimated` impact directly.
+* Preserved explicit skipped-impact API compatibility and event display metadata while
+  keeping skipped impact out of the normal browser product path.
+* Refined estimated impact after foot strike using contact-zone hand position,
+  wrist/grip motion transition, lead-side bracing, rotation evidence, and penalties for
+  early pre-contact or late finish-only frames.
+* Strengthened deterministic unit tests so early wrist-only movement and delayed finish
+  motion do not become impact, and updated app/API/static UI tests for restored normal
+  behavior.
+* Product, architecture, ADR, motion-knowledge, manual, development-log, and planning
+  docs are updated.
+* Required quality gates passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 113 tests and one existing Starlette/httpx deprecation
+  warning.
+* No release or deployment work was performed.
+
+DEV006-07 UI update planning scope:
+
+* Reorder the local browser swing result sections so `Detected Faults` appears after
+  `Feedback` and before `Detected Events And Phase Scores`.
+* Keep the change in the UI/template layer. Do not change swing scoring, pose
+  estimation, event detection, detected-fault generation, feedback content, API schemas,
+  replay overlays, storage, or application-service behavior.
+* Preserve existing labels, localization keys, empty states, rendering behavior, tables,
+  diagnostics, metrics, and controls.
+* Update the swing UI manual and deterministic static UI tests to verify the new section
+  order.
+
+DEV006-07 non-goals:
+
+* Pose-estimation changes; swing event-detection changes; scoring, fault-threshold,
+  confidence, or feedback-generation changes; API schema changes; replay overlay
+  changes; localization expansion beyond preserving existing labels; release or
+  deployment work.
+
+DEV006-07 acceptance criteria:
+
+* The browser result layout visually orders `Feedback`, then `Detected Faults`, then
+  `Detected Events And Phase Scores`.
+* Existing `Detected Faults` content and empty-state behavior are preserved.
+* Existing event and phase-score content, confidence labels, metrics, diagnostics, and
+  overlays are preserved.
+* Deterministic static UI tests verify the requested section order.
+* Relevant docs and `PLANS.md` are updated, required quality gates pass, and no release
+  or deployment is created.
+
+DEV006-07 UI update final-review-planning result:
+
+* Reordered the existing browser result sections so `Detected Faults` appears
+  immediately after `Feedback` and before `Detected Events And Phase Scores`.
+* Preserved existing section IDs, localization keys, rendering functions, empty states,
+  API payloads, swing scoring, event detection, detected-fault generation, feedback
+  content, replay overlays, metrics, and diagnostics.
+* Updated the static web UI test to verify the requested section order.
+* Updated the swing UI manual, feature catalog, development log, and planning docs.
+* Required quality gates passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 113 tests and one existing Starlette/httpx deprecation
+  warning.
+* No release or deployment work was performed.
+
 ### Milestone 8: Release Preparation
 
 Status: IN_PROGRESS
@@ -1378,6 +1832,36 @@ Acceptance criteria:
 | T-0079 | Implement Japanese UI localization | coding | DONE | Added `English / 日本語` selector and localized UI/result text |
 | T-0080 | QA Japanese UI localization | quality-assurance | DONE | Static UI/JS tests cover selector, localized strings, and no-rerun language switching |
 | T-0081 | Final review Japanese UI localization | final-review-planning | DONE | DEV005-01 acceptance criteria verified; no release/deployment |
+| T-0082 | Plan enhanced pose estimation | planning | DONE | DEV006-01 scope, non-goals, and acceptance criteria documented |
+| T-0083 | Design enhanced pose diagnostics | architecture | DONE | ADR-0012 documents pose quality, active window, tracking, and evidence diagnostics |
+| T-0084 | Implement enhanced pose estimation | coding | DONE | Added filtering, active window, impact constraints, schemas, compact UI diagnostics |
+| T-0085 | QA enhanced pose estimation | quality-assurance | DONE | Deterministic unit/integration/API/UI checks plus required quality gates passed |
+| T-0086 | Final review enhanced pose estimation | final-review-planning | DONE | DEV006-01 acceptance criteria verified; no release/deployment |
+| T-0087 | Plan enhanced swing event detection | planning | DONE | DEV006-03 scope, non-goals, acceptance criteria, and v3 prompt-file fallback documented |
+| T-0088 | Design enhanced swing event detection | architecture | DONE | ADR-0012 and system overview updated for event policy/status and skipped impact handling |
+| T-0089 | Implement enhanced swing event detection | coding | DONE | Added impact policy/status contract, revised setup/stride/foot-strike/follow-through heuristics, API/UI option |
+| T-0090 | QA enhanced swing event detection | quality-assurance | DONE | Added deterministic unit/app/API/UI tests; required quality gates pass |
+| T-0091 | Final review enhanced swing event detection | final-review-planning | DONE | DEV006-03 acceptance criteria verified; release/deployment intentionally skipped |
+| T-0092 | Plan enhanced swing event detection v4 | planning | DONE | DEV006-04 ordered state model, leg-lift stride, impact toggle, and finish-follow-through scope documented |
+| T-0093 | Design enhanced swing event detection v4 | architecture | DONE | Motion-owned state model with app/API config pass-through and UI-only impact toggle mapping |
+| T-0094 | Implement enhanced swing event detection v4 | coding | DONE | Added lead-leg lift stride, lift-aware foot strike, bounded follow-through, handedness-aware event config, visible impact control |
+| T-0095 | QA enhanced swing event detection v4 | quality-assurance | DONE | Added deterministic motion/UI tests; JS, Ruff, format, mypy, and full pytest pass |
+| T-0096 | Final review enhanced swing event detection v4 | final-review-planning | DONE | DEV006-04 acceptance criteria verified; release/deployment intentionally skipped |
+| T-0097 | Plan enhanced event display and no-ball scoring v5 | planning | DONE | DEV006-05 scope, acceptance criteria, confidence semantics, and non-goals documented |
+| T-0098 | Design enhanced event display and no-ball scoring v5 | architecture | DONE | Keep internal phase indexes; add app/API event display flags and motion-owned no-ball metric fallbacks |
+| T-0099 | Implement enhanced event display and no-ball scoring v5 | coding | DONE | Impact-off display flags, no-ball head/follow-through metric fallbacks, and stride fallback calibration |
+| T-0100 | QA enhanced event display and no-ball scoring v5 | quality-assurance | DONE | Unit/app/API/UI tests added; JS, Ruff, format, mypy, and full pytest pass |
+| T-0101 | Final review enhanced event display and no-ball scoring v5 | final-review-planning | DONE | DEV006-05 acceptance criteria verified; release/deployment intentionally skipped |
+| T-0102 | Plan restored estimated-impact workflow v6 | planning | DONE | DEV006-06 scope, acceptance criteria, confidence semantics, and non-goals documented |
+| T-0103 | Design restored estimated-impact workflow v6 | architecture | DONE | Normal UI uses body-pose-estimated impact; skip policy remains API-compatible; impact refinement stays in motion domain |
+| T-0104 | Implement restored estimated-impact workflow v6 | coding | DONE | Removed normal impact-off UI and refined post-foot-strike body-pose impact selection |
+| T-0105 | QA restored estimated-impact workflow v6 | quality-assurance | DONE | Unit/app/API/UI tests updated; JS, Ruff, format, mypy, and full pytest pass |
+| T-0106 | Final review restored estimated-impact workflow v6 | final-review-planning | DONE | DEV006-06 acceptance criteria verified; release/deployment intentionally skipped |
+| T-0107 | Plan swing result section order UI update | planning | DONE | DEV006-07 scope, acceptance criteria, and UI-only non-goals documented |
+| T-0108 | Design swing result section order UI update | architecture | DONE | Template-only ordering change; no domain/app/API/schema changes |
+| T-0109 | Implement swing result section order UI update | coding | DONE | Moved Detected Faults between Feedback and Detected Events And Phase Scores |
+| T-0110 | QA swing result section order UI update | quality-assurance | DONE | Static UI order test updated; JS, Ruff, format, mypy, and full pytest pass |
+| T-0111 | Final review swing result section order UI update | final-review-planning | DONE | DEV006-07 acceptance criteria verified; release/deployment intentionally skipped |
 
 ## Open Decisions
 

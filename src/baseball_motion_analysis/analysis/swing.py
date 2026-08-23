@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from baseball_motion_analysis.motion import (
     BodySide,
+    SwingEventDetectionConfig,
     SwingHandedness,
     SwingMeasurementSpace,
     SwingMetricName,
@@ -182,6 +183,7 @@ def analyze_swing(
     handedness: SwingHandedness = SwingHandedness.UNKNOWN,
     phase_frames: Mapping[SwingPhase, int] | None = None,
     config: SwingAnalysisConfig | None = None,
+    event_config: SwingEventDetectionConfig | None = None,
     frame_width: int | None = None,
     frame_height: int | None = None,
 ) -> SwingAnalysisResult:
@@ -190,6 +192,12 @@ def analyze_swing(
         raise ValueError("At least one pose frame is required for swing analysis.")
     ordered_frames = tuple(sorted(frames, key=lambda frame: frame.frame_index))
     evaluation_config = config or SwingAnalysisConfig()
+    swing_event_config = event_config or SwingEventDetectionConfig()
+    if (
+        swing_event_config.handedness == SwingHandedness.UNKNOWN
+        and handedness != SwingHandedness.UNKNOWN
+    ):
+        swing_event_config = replace(swing_event_config, handedness=handedness)
     measurement_space = SwingMeasurementSpace.from_dimensions(
         frame_width=frame_width,
         frame_height=frame_height,
@@ -199,6 +207,7 @@ def analyze_swing(
         phase_frames,
         frame_width=frame_width,
         frame_height=frame_height,
+        event_config=swing_event_config,
     )
     raw_metrics = calculate_swing_metrics(
         ordered_frames,
@@ -630,7 +639,10 @@ def _detect_faults(
     attack = metric_by_name[SwingMetricName.ESTIMATED_ATTACK_ANGLE]
     torso_tilt_change = metric_by_name[SwingMetricName.TORSO_TILT_PRESERVATION]
     attack_value = attack.value if attack.value is not None else -math.inf
-    if attack_value > config.excessive_attack_angle_degrees or _is_problem(torso_tilt_change):
+    impact_available = phases.is_available_for(SwingPhase.IMPACT)
+    if impact_available and (
+        attack_value > config.excessive_attack_angle_degrees or _is_problem(torso_tilt_change)
+    ):
         faults.append(
             SwingFaultResult(
                 fault_type=SwingFaultType.EXCESSIVE_UPPER_SWING_EARLY_EXTENSION,
@@ -643,17 +655,24 @@ def _detect_faults(
         )
 
     lead_knee = metric_by_name[SwingMetricName.LEAD_KNEE_BLOCKING_INDEX]
-    lead_knee_drift = _lead_knee_forward_drift_ratio(
-        frame_by_index[phases.foot_strike],
-        frame_by_index[phases.impact],
-        sides.lead,
-        sides.rear,
-        config.min_keypoint_confidence,
-        measurement_space,
+    lead_knee_drift = (
+        _lead_knee_forward_drift_ratio(
+            frame_by_index[phases.foot_strike],
+            frame_by_index[phases.impact],
+            sides.lead,
+            sides.rear,
+            config.min_keypoint_confidence,
+            measurement_space,
+        )
+        if impact_available
+        else None
     )
-    if _is_problem(lead_knee) or _ratio_exceeds(
-        lead_knee_drift,
-        config.lead_knee_forward_drift_ratio,
+    if impact_available and (
+        _is_problem(lead_knee)
+        or _ratio_exceeds(
+            lead_knee_drift,
+            config.lead_knee_forward_drift_ratio,
+        )
     ):
         faults.append(
             SwingFaultResult(

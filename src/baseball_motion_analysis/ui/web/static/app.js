@@ -72,6 +72,7 @@ const languageStorageKey = "baseball_motion_analysis.ui_language";
 let currentLanguage = supportedLanguage(localStorage.getItem(languageStorageKey) ?? "en");
 
 const allEvaluationMetricsValue = "__all__";
+const estimatedImpactPolicy = "body_pose_estimated";
 const selectedEvaluationMetrics = new Set();
 
 const translations = {
@@ -221,6 +222,8 @@ const translations = {
       "Based on the visible frames, the v2 youth baseline swing evaluation scored this swing {score}/100. The result confidence is {confidence}.",
     "result.no_faults": "No detected faults.",
     "result.event_row": "{label}: frame {frameIndex}, Event confidence {confidence}, {method}",
+    "result.event_fallback": "Fallback",
+    "result.event_status": "Status",
     "result.fault_row": "{faultType} at {phase} ({severity}):",
     "result.fault_evidence": "{evidence} Evidence frames: {frames}.",
     "confirm.delete": "Delete \"{displayName}\" from the local media library?",
@@ -359,6 +362,8 @@ const translations = {
     "result.summary": "表示フレームに基づく v2 少年野球ベースライン評価では、このスイングは {score}/100、結果の信頼度は {confidence} です。",
     "result.no_faults": "検出された課題はありません。",
     "result.event_row": "{label}: フレーム {frameIndex}、イベント信頼度 {confidence}、{method}",
+    "result.event_fallback": "フォールバック",
+    "result.event_status": "状態",
     "result.fault_row": "{phase} の {faultType}（{severity}）:",
     "result.fault_evidence": "{evidence} 根拠フレーム: {frames}。",
     "confirm.delete": "ローカルメディアライブラリから「{displayName}」を削除しますか？",
@@ -392,6 +397,13 @@ const localizedLabels = {
       faster: "Faster",
       normal: "Normal",
       notebook_parity: "Single Pose",
+      body_pose_estimated: "Body-Pose Estimated",
+      skip_without_ball: "Skip Without Ball",
+      require_ball_contact: "Require Ball Contact",
+      detected: "Detected",
+      estimated: "Estimated",
+      skipped: "Skipped",
+      unavailable: "Unavailable",
       video: "Video",
       raw: "Raw",
       stabilized: "Stabilized",
@@ -427,6 +439,14 @@ const localizedLabels = {
       selected_candidates: "Selected Candidates",
       max_stabilization_delta: "Max Stabilization Delta",
       changed_keypoints: "Changed Keypoints",
+      candidate_switches: "Candidate Switches",
+      candidate_ambiguity: "Candidate Ambiguity",
+      active_window: "Active Window",
+      active_window_peak: "Peak Motion Frame",
+      frame_quality: "Frame Quality",
+      weak_frames: "Weak Frames",
+      rejected_frames: "Rejected Frames",
+      scoring_evidence: "Scoring Evidence",
       sampling: "Sampling",
       phase_quality: "Phase Quality",
     },
@@ -485,6 +505,13 @@ const localizedLabels = {
       faster: "高速",
       normal: "通常",
       notebook_parity: "単一姿勢",
+      body_pose_estimated: "身体姿勢から推定",
+      skip_without_ball: "ボールなしはスキップ",
+      require_ball_contact: "ボール接触を必須",
+      detected: "検出",
+      estimated: "推定",
+      skipped: "スキップ",
+      unavailable: "利用不可",
       video: "動画",
       raw: "Raw",
       stabilized: "安定化後",
@@ -520,6 +547,14 @@ const localizedLabels = {
       selected_candidates: "選択候補",
       max_stabilization_delta: "最大安定化差分",
       changed_keypoints: "変更キーポイント数",
+      candidate_switches: "候補切替",
+      candidate_ambiguity: "候補の曖昧さ",
+      active_window: "有効スイング区間",
+      active_window_peak: "最大動作フレーム",
+      frame_quality: "フレーム品質",
+      weak_frames: "弱いフレーム",
+      rejected_frames: "除外フレーム",
+      scoring_evidence: "採点根拠",
       sampling: "サンプリング",
       phase_quality: "フェーズ品質",
     },
@@ -957,6 +992,7 @@ runSwingAnalysisButton.addEventListener("click", async () => {
         },
         pose_mode: swingPoseMode.value,
         overlay_source: poseOverlaySource.value,
+        impact_detection_policy: estimatedImpactPolicy,
       }),
     });
     const result = await response.json();
@@ -1013,10 +1049,11 @@ function renderSwingVideoAnalysis(result) {
   const analysis = result.analysis;
   const feedback = result.feedback;
   const limitations = uniqueValues([...(feedback.limitations ?? []), ...(result.limitations ?? [])]);
+  const visibleEvents = (result.events ?? []).filter((event) => event.is_visible !== false);
 
   analysisOverlayFrames = result.overlay_frames ?? result.overlay ?? [];
   analysisRawOverlayFrames = result.raw_overlay_frames ?? result.raw_overlay ?? [];
-  analysisEvents = result.events ?? [];
+  analysisEvents = visibleEvents;
   analysisEvaluationOverlay = result.evaluation_overlay ?? result.evaluation_lines ?? [];
   poseOverlayEnabled = analysisOverlayFrames.length > 0 || analysisRawOverlayFrames.length > 0;
   updatePoseOverlayToggle();
@@ -1030,12 +1067,15 @@ function renderSwingVideoAnalysis(result) {
   renderList(swingImprovementPoints, localizedImprovementPoints(analysis, feedback));
   renderList(swingDrills, localizedDrills(feedback));
   renderList(swingLimitations, localizedLimitations(limitations));
-  renderSwingEvents(analysisEvents);
+  renderSwingEvents(visibleEvents);
   renderPoseQuality(
     result.pose_diagnostics,
     result.sampling_diagnostics,
     result.raw_pose_diagnostics,
     result.pose_debug_diagnostics,
+    result.frame_quality_diagnostics,
+    result.active_window_diagnostics,
+    result.scoring_evidence_diagnostics,
   );
   renderPhaseScores(analysis.phase_scores);
   renderMetrics(analysis.metrics);
@@ -1151,20 +1191,45 @@ function renderList(container, values) {
 function renderSwingEvents(events) {
   swingEvents.replaceChildren();
   for (const event of events ?? []) {
+    if (event.is_visible === false) continue;
     const item = document.createElement("li");
-    item.textContent = t("result.event_row", {
+    const confidence =
+      event.status === "skipped" || event.status === "unavailable"
+        ? localizedValue(event.status)
+        : formatNumber(event.confidence, 2);
+    const eventText = t("result.event_row", {
       label: localizedValue(event.phase) || event.label,
       frameIndex: event.frame_index,
-      confidence: formatNumber(event.confidence, 2),
+      confidence,
       method: formatLabel(event.detection_method),
     });
+    const statusText = `${t("result.event_status")}: ${localizedValue(event.status)}`;
+    item.textContent = event.fallback_reason
+      ? `${eventText}, ${statusText}, ${t("result.event_fallback")}: ${event.fallback_reason}`
+      : `${eventText}, ${statusText}`;
     swingEvents.append(item);
   }
 }
 
-function renderPoseQuality(poseDiagnostics, samplingDiagnostics, rawPoseDiagnostics = null, poseDebugDiagnostics = null) {
+function renderPoseQuality(
+  poseDiagnostics,
+  samplingDiagnostics,
+  rawPoseDiagnostics = null,
+  poseDebugDiagnostics = null,
+  frameQualityDiagnostics = null,
+  activeWindowDiagnostics = null,
+  scoringEvidenceDiagnostics = null,
+) {
   swingPoseQuality.replaceChildren();
-  if (!poseDiagnostics && !samplingDiagnostics && !rawPoseDiagnostics && !poseDebugDiagnostics) {
+  if (
+    !poseDiagnostics &&
+    !samplingDiagnostics &&
+    !rawPoseDiagnostics &&
+    !poseDebugDiagnostics &&
+    !frameQualityDiagnostics &&
+    !activeWindowDiagnostics &&
+    !scoringEvidenceDiagnostics
+  ) {
     appendDiagnostic(localizedDiagnosticLabel("sampling"), "-");
     appendDiagnostic(localizedDiagnosticLabel("pose_detection"), "-");
     appendDiagnostic(localizedDiagnosticLabel("landmark_coverage"), "-");
@@ -1197,8 +1262,31 @@ function renderPoseQuality(poseDiagnostics, samplingDiagnostics, rawPoseDiagnost
     appendDiagnostic(localizedDiagnosticLabel("requested_poses"), String(poseDebugDiagnostics.requested_num_poses));
     appendDiagnostic(localizedDiagnosticLabel("selection_strategy"), formatLabel(poseDebugDiagnostics.player_selection_strategy));
     appendDiagnostic(localizedDiagnosticLabel("selected_candidates"), (poseDebugDiagnostics.selected_candidate_indexes ?? []).join(", ") || "-");
+    appendDiagnostic(localizedDiagnosticLabel("candidate_switches"), String(poseDebugDiagnostics.candidate_switch_count ?? 0));
+    appendDiagnostic(localizedDiagnosticLabel("candidate_ambiguity"), String(poseDebugDiagnostics.candidate_ambiguity_count ?? 0));
     appendDiagnostic(localizedDiagnosticLabel("max_stabilization_delta"), formatNumber(poseDebugDiagnostics.max_stabilization_delta_ratio, 2));
     appendDiagnostic(localizedDiagnosticLabel("changed_keypoints"), String(poseDebugDiagnostics.stabilization_changed_keypoint_count ?? 0));
+  }
+  if (frameQualityDiagnostics) {
+    appendDiagnostic(
+      localizedDiagnosticLabel("frame_quality"),
+      `${frameQualityDiagnostics.usable_frame_count} / ${frameQualityDiagnostics.total_frame_count}`,
+    );
+    appendDiagnostic(localizedDiagnosticLabel("weak_frames"), String(frameQualityDiagnostics.weak_frame_count ?? 0));
+    appendDiagnostic(localizedDiagnosticLabel("rejected_frames"), String(frameQualityDiagnostics.rejected_frame_count ?? 0));
+  }
+  if (activeWindowDiagnostics) {
+    appendDiagnostic(
+      localizedDiagnosticLabel("active_window"),
+      `${activeWindowDiagnostics.start_frame_index}-${activeWindowDiagnostics.end_frame_index} (${formatNumber(activeWindowDiagnostics.confidence, 2)})`,
+    );
+    appendDiagnostic(localizedDiagnosticLabel("active_window_peak"), String(activeWindowDiagnostics.peak_motion_frame_index));
+  }
+  if (scoringEvidenceDiagnostics) {
+    appendDiagnostic(
+      localizedDiagnosticLabel("scoring_evidence"),
+      String(scoringEvidenceDiagnostics.affected_metrics?.length ?? 0),
+    );
   }
 }
 
