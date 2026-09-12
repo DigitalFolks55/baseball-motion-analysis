@@ -49,6 +49,7 @@ from baseball_motion_analysis.pose import (
 )
 from baseball_motion_analysis.video import (
     FrameData,
+    FrameSamplingDiagnostics,
     FrameSamplingOptions,
     LocalMediaStorageConfig,
     MediaInputService,
@@ -130,9 +131,18 @@ class SwingVideoSamplingDiagnostics:
     effective_fps: float | None
     sampled_frame_count: int
     total_frame_count: int | None
+    source_duration_seconds: float | None
+    analyzed_start_seconds: float | None
+    analyzed_end_seconds: float | None
+    analyzed_duration_seconds: float | None
     max_frame_count: int
     cap_applied: bool
     full_frame_sampling: bool
+    temporal_coverage_complete: bool
+    timestamp_source: str
+    timestamp_fallback_reason: str | None = None
+    timestamp_repair_count: int = 0
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -325,7 +335,7 @@ class SwingVideoAnalysisApplicationService:
         mediapipe_config: MediaPipePoseEstimatorConfig | None = None,
         media_input_service: MediaInputService | None = None,
         pose_cache: dict[
-            tuple[str, SwingVideoSamplingOptions, str],
+            tuple[str, SwingVideoSamplingOptions, str, str, tuple[object, ...]],
             CachedPoseEstimation,
         ]
         | None = None,
@@ -427,7 +437,14 @@ class SwingVideoAnalysisApplicationService:
     def _pose_frames_for_video(
         self, request: AnalyzeSwingVideoRequest
     ) -> tuple[SwingPoseEstimationBundle, bool]:
-        cache_key = (request.media_id, request.sampling, request.pose_mode)
+        normalized_sampling = _normalized_sampling_options(request.sampling)
+        cache_key = (
+            request.media_id,
+            normalized_sampling,
+            request.pose_mode,
+            request.overlay_source,
+            _mediapipe_config_cache_fingerprint(self._mediapipe_config, request.pose_mode),
+        )
         cached = self._pose_cache.get(cache_key)
         if cached is not None:
             self.cache_hits += 1
@@ -459,7 +476,7 @@ class SwingVideoAnalysisApplicationService:
             LocalMediaStorageConfig(media_root=location.path.parent)
         )
         frame_sampling, requested_target_fps, requested_max_count = _frame_sampling_options(
-            request.sampling,
+            normalized_sampling,
             total_frame_count=record.total_frame_count,
         )
         sequence = media_input_service.load_video_file(
@@ -467,10 +484,9 @@ class SwingVideoAnalysisApplicationService:
             sampling=frame_sampling,
         )
         sampling_diagnostics = _sampling_diagnostics(
-            request.sampling,
+            normalized_sampling,
             sequence_frames=sequence.frames,
-            source_fps=sequence.metadata.fps,
-            total_frame_count=sequence.metadata.total_frame_count,
+            video_sampling_diagnostics=sequence.metadata.sampling_diagnostics,
             requested_target_fps=requested_target_fps,
             requested_max_count=requested_max_count,
         )
@@ -571,31 +587,30 @@ def _frame_sampling_options(
     *,
     total_frame_count: int | None,
 ) -> tuple[FrameSamplingOptions, float | None, int]:
-    defaults = _sampling_quality_defaults(request.quality_mode)
-    target_fps = request.target_fps if request.target_fps is not None else defaults["target_fps"]
-    max_frame_count = int(
-        request.max_frame_count
-        if request.max_frame_count is not None
-        else defaults["max_frame_count"]
-    )
-    full_frame_cap = int(
-        request.full_frame_max_frame_count
-        if request.full_frame_max_frame_count is not None
-        else defaults["full_frame_max_frame_count"]
-    )
-    use_full_frame_sampling = (
-        total_frame_count is not None
-        and total_frame_count <= full_frame_cap
-        and request.target_fps is None
-    )
+    del total_frame_count
+    normalized = _normalized_sampling_options(request)
     return (
         FrameSamplingOptions(
-            target_fps=None if use_full_frame_sampling else target_fps,
-            max_frame_count=max_frame_count,
+            target_fps=normalized.target_fps,
+            max_frame_count=normalized.max_frame_count,
             sample_every_n_frames=1,
         ),
-        None if use_full_frame_sampling else target_fps,
-        max_frame_count,
+        normalized.target_fps,
+        normalized.max_frame_count or 0,
+    )
+
+
+def _normalized_sampling_options(request: SwingVideoSamplingOptions) -> SwingVideoSamplingOptions:
+    defaults = _sampling_quality_defaults(request.quality_mode)
+    return SwingVideoSamplingOptions(
+        quality_mode=request.quality_mode,
+        target_fps=request.target_fps if request.target_fps is not None else defaults["target_fps"],
+        max_frame_count=(
+            request.max_frame_count
+            if request.max_frame_count is not None
+            else int(defaults["max_frame_count"])
+        ),
+        full_frame_max_frame_count=request.full_frame_max_frame_count,
     )
 
 
@@ -611,25 +626,58 @@ def _sampling_diagnostics(
     request: SwingVideoSamplingOptions,
     *,
     sequence_frames: Sequence[FrameData],
-    source_fps: float | None,
-    total_frame_count: int | None,
+    video_sampling_diagnostics: FrameSamplingDiagnostics | None,
     requested_target_fps: float | None,
     requested_max_count: int,
 ) -> SwingVideoSamplingDiagnostics:
+    if video_sampling_diagnostics is not None:
+        return SwingVideoSamplingDiagnostics(
+            quality_mode=request.quality_mode,
+            source_fps=video_sampling_diagnostics.source_fps,
+            target_fps=requested_target_fps,
+            effective_fps=video_sampling_diagnostics.achieved_fps,
+            sampled_frame_count=video_sampling_diagnostics.sampled_frame_count,
+            total_frame_count=video_sampling_diagnostics.total_frame_count,
+            source_duration_seconds=video_sampling_diagnostics.source_duration_seconds,
+            analyzed_start_seconds=video_sampling_diagnostics.analyzed_start_seconds,
+            analyzed_end_seconds=video_sampling_diagnostics.analyzed_end_seconds,
+            analyzed_duration_seconds=video_sampling_diagnostics.analyzed_duration_seconds,
+            max_frame_count=requested_max_count,
+            cap_applied=video_sampling_diagnostics.cap_applied,
+            full_frame_sampling=video_sampling_diagnostics.full_frame_sampling,
+            temporal_coverage_complete=video_sampling_diagnostics.temporal_coverage_complete,
+            timestamp_source=video_sampling_diagnostics.timestamp_source,
+            timestamp_fallback_reason=video_sampling_diagnostics.timestamp_fallback_reason,
+            timestamp_repair_count=video_sampling_diagnostics.timestamp_repair_count,
+            limitations=video_sampling_diagnostics.limitations,
+        )
     sampled_count = len(sequence_frames)
-    effective_fps = _effective_sampled_fps(sequence_frames, source_fps)
-    cap_applied = total_frame_count is not None and sampled_count < total_frame_count
-    full_frame_sampling = total_frame_count is not None and sampled_count >= total_frame_count
+    effective_fps = _effective_sampled_fps(sequence_frames, None)
+    analyzed_start = sequence_frames[0].timestamp_seconds if sequence_frames else None
+    analyzed_end = sequence_frames[-1].timestamp_seconds if sequence_frames else None
+    analyzed_duration = (
+        analyzed_end - analyzed_start
+        if analyzed_start is not None
+        and analyzed_end is not None
+        and analyzed_end >= analyzed_start
+        else None
+    )
     return SwingVideoSamplingDiagnostics(
         quality_mode=request.quality_mode,
-        source_fps=source_fps,
+        source_fps=None,
         target_fps=requested_target_fps,
         effective_fps=effective_fps,
         sampled_frame_count=sampled_count,
-        total_frame_count=total_frame_count,
+        total_frame_count=None,
+        source_duration_seconds=analyzed_duration,
+        analyzed_start_seconds=analyzed_start,
+        analyzed_end_seconds=analyzed_end,
+        analyzed_duration_seconds=analyzed_duration,
         max_frame_count=requested_max_count,
-        cap_applied=cap_applied,
-        full_frame_sampling=full_frame_sampling,
+        cap_applied=False,
+        full_frame_sampling=False,
+        temporal_coverage_complete=True,
+        timestamp_source="unknown",
     )
 
 
@@ -663,6 +711,16 @@ def _sampling_limitations(
             "Sampling was reduced by the selected quality mode or frame cap; very fast "
             "swing events may be missed."
         )
+    if not diagnostics.temporal_coverage_complete:
+        limitations.append(
+            "Sampling did not include both the first and final usable source frames."
+        )
+    if diagnostics.timestamp_fallback_reason is not None:
+        limitations.append(
+            "Video timestamp timing used a fallback or repair path; inspect diagnostics "
+            "when comparing variable-frame-rate clips."
+        )
+    limitations.extend(diagnostics.limitations)
     if diagnostics.quality_mode == "faster":
         limitations.append(
             "Faster analysis mode uses fewer frames and can reduce phase detection accuracy."
@@ -683,6 +741,37 @@ def _fallback_pose_debug_diagnostics(
         requested_num_poses=1,
         player_selection_strategy="injected_pose_estimator",
         selected_candidate_indexes=(),
+    )
+
+
+def _mediapipe_config_cache_fingerprint(
+    config: MediaPipePoseEstimatorConfig,
+    pose_mode: str,
+) -> tuple[object, ...]:
+    effective = (
+        MediaPipePoseEstimatorConfig.notebook_parity(config)
+        if pose_mode == "notebook_parity"
+        else config
+    )
+    return (
+        "timestamp_policy_v1",
+        effective.num_poses,
+        effective.min_pose_detection_confidence,
+        effective.min_pose_presence_confidence,
+        effective.min_tracking_confidence,
+        effective.min_landmark_confidence,
+        effective.smoothing_window_seconds,
+        effective.max_interpolation_gap_seconds,
+        effective.outlier_rejection_enabled,
+        effective.outlier_distance_ratio,
+        effective.high_velocity_smoothing_limit_ratio,
+        effective.stabilization_delta_warning_ratio,
+        effective.candidate_switch_margin,
+        effective.candidate_ambiguity_margin,
+        effective.player_selection_strategy,
+        effective.processing_mode,
+        effective.enable_segmentation_mask,
+        effective.runtime_delegate,
     )
 
 

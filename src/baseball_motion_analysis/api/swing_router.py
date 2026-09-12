@@ -262,8 +262,8 @@ def _mediapipe_config_from_settings(settings: Any) -> MediaPipePoseEstimatorConf
         min_pose_presence_confidence=settings.mediapipe_min_pose_presence_confidence,
         min_tracking_confidence=settings.mediapipe_min_tracking_confidence,
         min_landmark_confidence=settings.mediapipe_min_landmark_confidence,
-        smoothing_window=settings.mediapipe_smoothing_window,
-        max_interpolation_gap_frames=settings.mediapipe_max_interpolation_gap_frames,
+        smoothing_window_seconds=settings.effective_mediapipe_smoothing_window_seconds,
+        max_interpolation_gap_seconds=(settings.effective_mediapipe_max_interpolation_gap_seconds),
         outlier_rejection_enabled=settings.mediapipe_outlier_rejection_enabled,
         outlier_distance_ratio=settings.mediapipe_outlier_distance_ratio,
         high_velocity_smoothing_limit_ratio=(

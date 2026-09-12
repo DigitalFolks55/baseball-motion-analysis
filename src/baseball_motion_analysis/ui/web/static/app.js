@@ -67,6 +67,9 @@ let poseOverlayEnabled = false;
 let evaluationLinesEnabled = false;
 let lastSwingAnalysisResult = null;
 let lastLibraryRecords = [];
+let presentedOverlayTimeSeconds = 0;
+let videoFrameCallbackHandle = null;
+let overlayAnimationFrameHandle = null;
 
 const languageStorageKey = "baseball_motion_analysis.ui_language";
 let currentLanguage = supportedLanguage(localStorage.getItem(languageStorageKey) ?? "en");
@@ -146,6 +149,8 @@ const translations = {
     "table.phase": "Phase",
     "table.score": "Score",
     "table.weight": "Weight",
+    "table.metric_deduction": "Metric Deduction",
+    "table.fault_deduction": "Fault Deduction",
     "table.score_confidence": "Score Confidence",
     "table.metric": "Metric",
     "table.value": "Value",
@@ -225,7 +230,7 @@ const translations = {
     "result.event_fallback": "Fallback",
     "result.event_status": "Status",
     "result.fault_row": "{faultType} at {phase} ({severity}):",
-    "result.fault_evidence": "{evidence} Evidence frames: {frames}.",
+    "result.fault_evidence": "{evidence} Score impact: {deduction}. Linked metrics: {metrics}. Evidence frames: {frames}.",
     "confirm.delete": "Delete \"{displayName}\" from the local media library?",
   },
   ja: {
@@ -288,6 +293,8 @@ const translations = {
     "table.phase": "フェーズ",
     "table.score": "スコア",
     "table.weight": "重み",
+    "table.metric_deduction": "指標減点",
+    "table.fault_deduction": "課題減点",
     "table.score_confidence": "スコア信頼度",
     "table.metric": "指標",
     "table.value": "値",
@@ -365,7 +372,7 @@ const translations = {
     "result.event_fallback": "フォールバック",
     "result.event_status": "状態",
     "result.fault_row": "{phase} の {faultType}（{severity}）:",
-    "result.fault_evidence": "{evidence} 根拠フレーム: {frames}。",
+    "result.fault_evidence": "{evidence} スコア影響: {deduction}。関連指標: {metrics}。根拠フレーム: {frames}。",
     "confirm.delete": "ローカルメディアライブラリから「{displayName}」を削除しますか？",
   },
 };
@@ -691,6 +698,10 @@ function formatNumber(value, digits = 2) {
   return value.toFixed(digits);
 }
 
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
 function formatTitleCase(value) {
   return String(value ?? "-")
     .replaceAll("_", " ")
@@ -864,6 +875,7 @@ async function deleteVideo(mediaId, displayName) {
 }
 
 async function loadReplay(mediaId) {
+  stopOverlayUpdateLoop();
   playbackStatus.textContent = t("status.replay_loading");
   playbackError.textContent = "";
   try {
@@ -875,6 +887,7 @@ async function loadReplay(mediaId) {
     activeManifest = manifest;
     videoPlayer.src = manifest.content_url;
     videoPlayer.playbackRate = Number(playbackRate.value);
+    presentedOverlayTimeSeconds = 0;
     replayTitle.textContent = manifest.display_name;
     analysisVideoTitle.textContent = manifest.display_name;
     swingAnalysisSource.textContent = manifest.display_name;
@@ -886,7 +899,7 @@ async function loadReplay(mediaId) {
     clearAnalysis({ status: t("status.ready_analysis") });
     updateCurrentTime();
     updateSwingRunState();
-    drawPoseOverlay();
+    redrawPoseOverlayAt(videoPlayer.currentTime);
   } catch (error) {
     playbackError.textContent = error.message;
     playbackStatus.textContent = t("status.replay_unavailable");
@@ -1014,6 +1027,7 @@ runSwingAnalysisButton.addEventListener("click", async () => {
 });
 
 function clearAnalysis({ status }) {
+  stopOverlayUpdateLoop();
   lastSwingAnalysisResult = null;
   analysisOverlayFrames = [];
   analysisRawOverlayFrames = [];
@@ -1081,7 +1095,7 @@ function renderSwingVideoAnalysis(result) {
   renderMetrics(analysis.metrics);
   renderFaults(analysis.detected_faults);
   swingAnalysisResults.hidden = false;
-  drawPoseOverlay();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
 }
 
 function localizedSwingSummary(analysis, feedback) {
@@ -1307,6 +1321,8 @@ function renderPhaseScores(scores) {
     appendCell(row, formatLabel(score.phase));
     appendCell(row, formatNumber(score.score, 1));
     appendCell(row, `${formatNumber(score.weight * 100, 0)}%`);
+    appendCell(row, formatNumber(score.metric_deduction ?? 0, 2));
+    appendCell(row, formatNumber(score.fault_deduction ?? 0, 2));
     appendCell(row, formatNumber(score.confidence, 2));
     swingPhaseScores.append(row);
   }
@@ -1357,6 +1373,8 @@ function renderFaults(faults) {
     evidence.tabIndex = 0;
     evidence.textContent = t("result.fault_evidence", {
       evidence: fault.evidence,
+      deduction: formatNumber(fault.deduction ?? 0, 2),
+      metrics: (fault.linked_metrics ?? []).map((metric) => formatEvaluationMetricLabel(metric)).join(", ") || "-",
       frames: (fault.evidence_frames ?? []).join(", "),
     });
     item.append(evidence);
@@ -1394,17 +1412,44 @@ function formatTarget(min, max) {
   return `${formatNumber(min, 2)} - ${formatNumber(max, 2)}`;
 }
 
-function nearestOverlayFrame() {
+function nearestOverlayFrame(mediaTime = presentedOverlayTimeSeconds) {
   const frames = currentOverlayFrames();
   if (!frames.length) return null;
-  const fpsValue = activeManifest?.fps;
-  if (!fpsValue) return frames[0];
-  const currentFrameIndex = Math.round(videoPlayer.currentTime * fpsValue);
+  return nearestOverlayFrameByTimestamp(frames, mediaTime);
+}
+
+function nearestOverlayFrameByTimestamp(frames, mediaTime) {
+  if (!frames?.length) return null;
+  if (!isFiniteNumber(mediaTime)) return frames[0];
   return frames.reduce((nearest, frame) => {
-    const nearestDistance = Math.abs((nearest.frame_index ?? 0) - currentFrameIndex);
-    const frameDistance = Math.abs((frame.frame_index ?? 0) - currentFrameIndex);
-    return frameDistance < nearestDistance ? frame : nearest;
+    const nearestTimestamp = isFiniteNumber(nearest.timestamp_seconds)
+      ? Number(nearest.timestamp_seconds)
+      : 0;
+    const frameTimestamp = isFiniteNumber(frame.timestamp_seconds)
+      ? Number(frame.timestamp_seconds)
+      : nearestTimestamp;
+    const nearestDistance = Math.abs(nearestTimestamp - mediaTime);
+    const frameDistance = Math.abs(frameTimestamp - mediaTime);
+    if (frameDistance < nearestDistance) return frame;
+    if (frameDistance === nearestDistance && frameTimestamp < nearestTimestamp) return frame;
+    return nearest;
   }, frames[0]);
+}
+
+function overlayExactToleranceSeconds(frames) {
+  const timestamps = (frames ?? [])
+    .map((frame) => Number(frame.timestamp_seconds))
+    .filter(Number.isFinite)
+    .sort((first, second) => first - second);
+  const intervals = [];
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const delta = timestamps[index] - timestamps[index - 1];
+    if (delta > 0) intervals.push(delta);
+  }
+  if (!intervals.length) return 0.010;
+  intervals.sort((first, second) => first - second);
+  const median = intervals[Math.floor(intervals.length / 2)];
+  return Math.min(0.010, median / 2);
 }
 
 function currentOverlayFrames() {
@@ -1415,6 +1460,11 @@ function currentOverlayFrames() {
 }
 
 function drawPoseOverlay() {
+  redrawPoseOverlayAt(presentedOverlayTimeSeconds);
+}
+
+function redrawPoseOverlayAt(mediaTime) {
+  presentedOverlayTimeSeconds = isFiniteNumber(mediaTime) ? Number(mediaTime) : videoPlayer.currentTime;
   const canvas = poseOverlayCanvas;
   const context = canvas.getContext("2d");
   const rect = canvas.getBoundingClientRect();
@@ -1426,7 +1476,7 @@ function drawPoseOverlay() {
   }
   context.clearRect(0, 0, canvas.width, canvas.height);
 
-  const frame = nearestOverlayFrame();
+  const frame = nearestOverlayFrame(presentedOverlayTimeSeconds);
   if (!frame?.keypoints?.length) {
     poseOverlayStatus.textContent = overlayMessage();
     return;
@@ -1451,7 +1501,7 @@ function drawPoseOverlay() {
   }
   poseOverlayStatus.textContent = t("overlay.showing", {
     message: overlayMessage(),
-    matchStatus: overlayFrameMatchStatus(frame),
+    matchStatus: overlayFrameMatchStatus(frame, presentedOverlayTimeSeconds),
     source: formatLabel(frame.source ?? poseOverlaySource.value),
     frameIndex: frame.frame_index,
   });
@@ -1549,14 +1599,14 @@ poseOverlayToggle.addEventListener("click", () => {
   if (!currentOverlayFrames().length) return;
   poseOverlayEnabled = !poseOverlayEnabled;
   updatePoseOverlayToggle();
-  drawPoseOverlay();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
 });
 
 evaluationLinesToggle.addEventListener("click", () => {
   if (!analysisEvaluationOverlay.length) return;
   evaluationLinesEnabled = !evaluationLinesEnabled;
   updateEvaluationLinesToggle();
-  drawPoseOverlay();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
 });
 
 evaluationMetricToggle.addEventListener("click", () => {
@@ -1569,7 +1619,7 @@ evaluationMetricToggle.addEventListener("click", () => {
 evaluationMetricMenu.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement) {
     syncSelectedEvaluationMetricsFromMenu(event.target);
-    drawPoseOverlay();
+    redrawPoseOverlayAt(videoPlayer.currentTime);
   }
 });
 
@@ -1605,16 +1655,15 @@ function closeEvaluationMetricMenu() {
   evaluationMetricToggle.setAttribute("aria-expanded", "false");
 }
 
-function overlayFrameMatchStatus(frame) {
+function overlayFrameMatchStatus(frame, mediaTime = presentedOverlayTimeSeconds) {
   const hasInterpolatedLandmarks = frame.keypoints.some((keypoint) => keypoint.interpolated);
-  const fpsValue = activeManifest?.fps;
   const frameTime = Number.isFinite(frame.timestamp_seconds) ? frame.timestamp_seconds : null;
-  const offsetMs = frameTime === null ? null : Math.round((frameTime - videoPlayer.currentTime) * 1000);
+  const offsetMs = frameTime === null ? null : Math.round((frameTime - mediaTime) * 1000);
   const offsetText = offsetMs === null || offsetMs === 0 ? "" : t("overlay.offset", { offsetMs });
   if (hasInterpolatedLandmarks) return t("overlay.interpolated", { offset: offsetText });
-  if (!fpsValue) return t("overlay.nearest_sampled", { offset: offsetText });
-  const currentFrameIndex = Math.round(videoPlayer.currentTime * fpsValue);
-  return currentFrameIndex === frame.frame_index
+  if (frameTime === null) return t("overlay.nearest_sampled", { offset: offsetText });
+  const toleranceSeconds = overlayExactToleranceSeconds(currentOverlayFrames());
+  return Math.abs(frameTime - mediaTime) <= toleranceSeconds
     ? t("overlay.exact_sampled")
     : t("overlay.nearest_sampled", { offset: offsetText });
 }
@@ -1796,16 +1845,34 @@ playbackRate.addEventListener("change", () => {
 
 videoPlayer.addEventListener("timeupdate", () => {
   updateCurrentTime();
-  drawPoseOverlay();
+  if (videoPlayer.paused) redrawPoseOverlayAt(videoPlayer.currentTime);
 });
 videoPlayer.addEventListener("loadedmetadata", () => {
   updateCurrentTime();
-  drawPoseOverlay();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
+});
+videoPlayer.addEventListener("loadeddata", () => {
+  redrawPoseOverlayAt(videoPlayer.currentTime);
+});
+videoPlayer.addEventListener("play", () => {
+  startOverlayUpdateLoop();
+});
+videoPlayer.addEventListener("pause", () => {
+  stopOverlayUpdateLoop();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
+});
+videoPlayer.addEventListener("seeked", () => {
+  redrawPoseOverlayAt(videoPlayer.currentTime);
+});
+videoPlayer.addEventListener("ended", () => {
+  stopOverlayUpdateLoop();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
 });
 videoPlayer.addEventListener("error", () => {
+  stopOverlayUpdateLoop();
   playbackError.textContent = t("status.video_error");
 });
-window.addEventListener("resize", drawPoseOverlay);
+window.addEventListener("resize", () => redrawPoseOverlayAt(videoPlayer.currentTime));
 
 function updateCurrentTime() {
   const duration = Number.isFinite(videoPlayer.duration) ? videoPlayer.duration : activeManifest?.duration_seconds ?? 0;
@@ -1819,8 +1886,53 @@ function stepFrame(direction) {
   if (!activeManifest?.fps) return;
   const increment = 1 / activeManifest.fps;
   videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + direction * increment);
-  drawPoseOverlay();
+  redrawPoseOverlayAt(videoPlayer.currentTime);
 }
+
+function startOverlayUpdateLoop() {
+  stopOverlayUpdateLoop();
+  if (typeof videoPlayer.requestVideoFrameCallback === "function") {
+    const onFrame = (_now, metadata) => {
+      const mediaTime = isFiniteNumber(metadata?.mediaTime)
+        ? Number(metadata.mediaTime)
+        : videoPlayer.currentTime;
+      updateCurrentTime();
+      redrawPoseOverlayAt(mediaTime);
+      if (!videoPlayer.paused && !videoPlayer.ended) {
+        videoFrameCallbackHandle = videoPlayer.requestVideoFrameCallback(onFrame);
+      }
+    };
+    videoFrameCallbackHandle = videoPlayer.requestVideoFrameCallback(onFrame);
+    return;
+  }
+  const onAnimationFrame = () => {
+    updateCurrentTime();
+    redrawPoseOverlayAt(videoPlayer.currentTime);
+    if (!videoPlayer.paused && !videoPlayer.ended) {
+      overlayAnimationFrameHandle = window.requestAnimationFrame(onAnimationFrame);
+    }
+  };
+  overlayAnimationFrameHandle = window.requestAnimationFrame(onAnimationFrame);
+}
+
+function stopOverlayUpdateLoop() {
+  if (
+    videoFrameCallbackHandle !== null &&
+    typeof videoPlayer.cancelVideoFrameCallback === "function"
+  ) {
+    videoPlayer.cancelVideoFrameCallback(videoFrameCallbackHandle);
+  }
+  if (overlayAnimationFrameHandle !== null) {
+    window.cancelAnimationFrame(overlayAnimationFrameHandle);
+  }
+  videoFrameCallbackHandle = null;
+  overlayAnimationFrameHandle = null;
+}
+
+window.baseballMotionAnalysisOverlayTiming = {
+  nearestOverlayFrameByTimestamp,
+  overlayExactToleranceSeconds,
+};
 
 loadLibrary();
 applyLanguage();

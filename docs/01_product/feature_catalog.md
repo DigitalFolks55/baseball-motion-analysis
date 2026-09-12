@@ -142,6 +142,10 @@ Current foundation:
 - Rule-based swing error candidates include door swing / casting, forward axis drift,
   arms-only / one-piece swing, excessive upper swing / early extension, and collapsed
   lead side.
+- Swing scoring is fault-aware. Detected faults carry linked metric names and a bounded
+  score impact. Metric deductions are credited first so metric-backed faults are not
+  double-counted as full independent penalties, while secondary evidence such as
+  wrist-to-chest distance or lead-knee forward drift can still affect the score.
 - The application-service boundary returns an in-memory analysis result and feedback
   report with scores, good points, improvement points, drills, confidence, and
   limitations.
@@ -149,8 +153,25 @@ Current foundation:
   stored video and keeps throwing, pitching, and fielding visible as planned categories.
 - The browser UI calls `/api/v1/analysis/swing/video`, which resolves the stored video
   through application services and calls `SwingVideoAnalysisApplicationService`.
+- Stored-video swing analysis uses a timestamp-first frame-rate policy. Frame indexes
+  remain decoded source-frame identifiers, while `timestamp_seconds` carries presentation
+  time through sampling, pose estimation, swing analysis, API responses, and replay
+  overlays.
+- Higher-accuracy video analysis uses a stable maximum 30 FPS analysis cadence with a
+  180-frame cap applied across the full usable clip. Balanced uses 24 FPS/120 frames,
+  and Faster uses 12 FPS/60 frames. Lower-FPS sources use every source frame without
+  fabricated frames.
+- Sampling diagnostics report source FPS, requested analysis FPS, achieved FPS, sampled
+  and total frame counts, analyzed time range, source duration, cap status, timestamp
+  source/fallback/repair status, and timing limitations.
+- Motion-rate and stabilization behavior is time-normalized. The 30 FPS path remains the
+  calibration reference for converted thresholds; hip/shoulder separation timing is now
+  reported in milliseconds.
 - Swing analysis results are displayed locally with overall score, phase scores, metrics,
   detected faults, feedback, confidence, and limitations.
+- Phase scores display metric and fault deduction components returned by the analysis
+  service. Detected faults display score impact and linked metrics returned by the API;
+  the browser does not calculate baseball scoring rules.
 - In the browser result layout, detected faults are shown immediately after feedback and
   before the detected events and phase-score table so likely issues are visible before
   event details.
@@ -222,14 +243,20 @@ Current foundation:
   values, known feedback templates, metric names, events, faults, drills, and common
   limitations. Swing scoring, thresholds, storage, video handling, pose estimation,
   application services, and API responses remain language-independent.
+- Replay pose overlays select returned overlay frames by `timestamp_seconds` and use
+  presented video frame callbacks when the browser supports them, with an animation-frame
+  fallback for other browsers.
 
 Current limitations:
 
 - The default real pose backend requires a local MediaPipe Pose Landmarker `.task` model
   configured with `BMA_MEDIAPIPE_POSE_MODEL_PATH`.
-- Pose is estimated from sampled frames. Higher accuracy mode samples more frames and can
-  process every original frame for short clips under the configured cap; faster mode can
-  miss fast swing events.
+- Pose is estimated from sampled frames, not necessarily every original source frame.
+  Faster mode can still miss fast swing events because it intentionally samples fewer
+  frames.
+- OpenCV presentation timestamps are backend and container dependent. When reliable
+  decoder timestamps are unavailable, the app synthesizes constant-FPS timestamps or
+  repairs irregular timestamps and reports that limitation in diagnostics.
 - `Single pose` mode is diagnostic-only and should not be treated as the final coached
   evaluation path.
 - MediaPipe detects player body landmarks only. It does not detect bat tip, bat barrel,

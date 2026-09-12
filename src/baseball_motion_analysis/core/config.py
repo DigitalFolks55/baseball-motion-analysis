@@ -34,8 +34,10 @@ class AppSettings(BaseSettings):
     mediapipe_min_pose_presence_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     mediapipe_min_tracking_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     mediapipe_min_landmark_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
-    mediapipe_smoothing_window: int = Field(default=3, ge=1)
-    mediapipe_max_interpolation_gap_frames: int = Field(default=2, ge=0)
+    mediapipe_smoothing_window_seconds: float | None = Field(default=None, ge=0.0)
+    mediapipe_max_interpolation_gap_seconds: float | None = Field(default=None, ge=0.0)
+    mediapipe_smoothing_window: int | None = Field(default=None, ge=1)
+    mediapipe_max_interpolation_gap_frames: int | None = Field(default=None, ge=0)
     mediapipe_outlier_rejection_enabled: bool = True
     mediapipe_outlier_distance_ratio: float = Field(default=0.75, gt=0.0)
     mediapipe_high_velocity_smoothing_limit_ratio: float = Field(default=0.8, gt=0.0)
@@ -64,6 +66,24 @@ class AppSettings(BaseSettings):
         if self.runtime_mode is RuntimeMode.LOCAL:
             return "Files stay under the configured local media directory on this computer."
         return "Files are stored on the configured server-side media directory."
+
+    @property
+    def effective_mediapipe_smoothing_window_seconds(self) -> float:
+        """Return duration-based pose smoothing with frame-count env compatibility."""
+        if self.mediapipe_smoothing_window_seconds is not None:
+            return self.mediapipe_smoothing_window_seconds
+        if self.mediapipe_smoothing_window is not None:
+            return self.mediapipe_smoothing_window / 30.0
+        return 3 / 30.0
+
+    @property
+    def effective_mediapipe_max_interpolation_gap_seconds(self) -> float:
+        """Return duration-based interpolation gap with frame-count env compatibility."""
+        if self.mediapipe_max_interpolation_gap_seconds is not None:
+            return self.mediapipe_max_interpolation_gap_seconds
+        if self.mediapipe_max_interpolation_gap_frames is not None:
+            return self.mediapipe_max_interpolation_gap_frames / 30.0
+        return 2 / 30.0
 
 
 def load_settings() -> AppSettings:

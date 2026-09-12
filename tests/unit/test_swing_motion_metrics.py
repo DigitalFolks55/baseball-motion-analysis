@@ -214,7 +214,7 @@ def test_detect_swing_phases_selects_semantic_follow_through_after_impact() -> N
 
     phases = detect_swing_phases(frames)
 
-    assert phases.impact == 4
+    assert phases.impact == 5
     assert phases.follow_through > phases.impact + 1
     assert phases.detection_method_for(SwingPhase.FOLLOW_THROUGH) == "post_impact_extension_window"
 
@@ -225,7 +225,7 @@ def test_detect_swing_phases_follow_through_ignores_idle_reset_frames() -> None:
     phases = detect_swing_phases(frames)
 
     assert phases.follow_through < frames[-1].frame_index
-    assert phases.follow_through <= 8
+    assert phases.follow_through <= 9
 
 
 def test_calculate_swing_metrics_for_good_sequence() -> None:
@@ -248,10 +248,36 @@ def test_calculate_swing_metrics_for_good_sequence() -> None:
     assert metrics[SwingMetricName.HEAD_TRANSLATION_RATIO].value == pytest.approx(0.0)
     assert metrics[SwingMetricName.EARLY_CONNECTION_ANGLE].value == pytest.approx(95.04, abs=0.1)
     assert metrics[SwingMetricName.LEAD_KNEE_BLOCKING_INDEX].value == pytest.approx(0.0)
-    assert metrics[SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING].value == pytest.approx(1.0)
+    assert metrics[SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING].value == pytest.approx(
+        1000.0 / 30.0
+    )
     assert metrics[SwingMetricName.ESTIMATED_ATTACK_ANGLE].value == pytest.approx(10.0, abs=0.1)
     assert metrics[SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE].value == pytest.approx(0.0)
     assert all(math.isfinite(metric.value or 0.0) for metric in metrics.values())
+
+
+def test_hip_shoulder_timing_is_timestamp_based_across_fps() -> None:
+    values = []
+    for fps in (24.0, 30.0, 60.0, 120.0):
+        frames = _timed_rotation_sequence(fps)
+        phases = {
+            SwingPhase.SETUP: frames[0].frame_index,
+            SwingPhase.STRIDE: frames[max(1, round(0.2 * fps))].frame_index,
+            SwingPhase.FOOT_STRIKE: frames[max(2, round(0.35 * fps))].frame_index,
+            SwingPhase.IMPACT: frames[max(3, round(0.5 * fps))].frame_index,
+            SwingPhase.FOLLOW_THROUGH: frames[-1].frame_index,
+        }
+        metrics = {
+            metric.name: metric
+            for metric in calculate_swing_metrics(
+                frames,
+                detect_swing_phases(frames, phases),
+                SwingHandedness.RIGHT_HANDED,
+            )
+        }
+        values.append(metrics[SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING].value)
+
+    assert values == pytest.approx([100.0, 100.0, 100.0, 100.0], abs=1000.0 / 24.0)
 
 
 def test_calculate_swing_metrics_restores_non_contact_fallbacks_without_ball_contact() -> None:
@@ -542,6 +568,37 @@ def _follow_through_then_idle_reset_frames() -> tuple[PoseFrame, ...]:
                 grip_x=grip_x,
                 hip_mid_x=hip_mid_x,
                 shoulder_tilt=-0.04 if 4 <= frame_index <= 8 else 0.0,
+            )
+        )
+    return tuple(frames)
+
+
+def _timed_rotation_sequence(fps: float) -> tuple[PoseFrame, ...]:
+    frames: list[PoseFrame] = []
+    frame_count = int(fps * 0.8) + 1
+    for frame_index in range(frame_count):
+        timestamp = frame_index / fps
+        hip_tilt = -0.10 if timestamp >= 0.30 else 0.0
+        shoulder_tilt = -0.10 if timestamp >= 0.40 else 0.0
+        frames.append(
+            PoseFrame(
+                frame_index=frame_index,
+                timestamp_seconds=timestamp,
+                keypoints={
+                    PoseKeypointName.NOSE: PoseKeypoint(Point2D(0.5, 0.2)),
+                    PoseKeypointName.LEFT_SHOULDER: PoseKeypoint(
+                        Point2D(0.62, 0.40 + shoulder_tilt)
+                    ),
+                    PoseKeypointName.RIGHT_SHOULDER: PoseKeypoint(Point2D(0.38, 0.40)),
+                    PoseKeypointName.LEFT_WRIST: PoseKeypoint(Point2D(0.74, 0.48)),
+                    PoseKeypointName.RIGHT_WRIST: PoseKeypoint(Point2D(0.66, 0.50)),
+                    PoseKeypointName.LEFT_HIP: PoseKeypoint(Point2D(0.60, 0.68 + hip_tilt)),
+                    PoseKeypointName.RIGHT_HIP: PoseKeypoint(Point2D(0.40, 0.68)),
+                    PoseKeypointName.LEFT_KNEE: PoseKeypoint(Point2D(0.64, 0.83)),
+                    PoseKeypointName.RIGHT_KNEE: PoseKeypoint(Point2D(0.40, 0.83)),
+                    PoseKeypointName.LEFT_ANKLE: PoseKeypoint(Point2D(0.65, 0.96)),
+                    PoseKeypointName.RIGHT_ANKLE: PoseKeypoint(Point2D(0.36, 0.96)),
+                },
             )
         )
     return tuple(frames)

@@ -9,6 +9,10 @@ from enum import StrEnum
 
 from baseball_motion_analysis.pose import Point2D, PoseFrame, PoseKeypoint, PoseKeypointName
 
+_REFERENCE_FPS = 30.0
+_MIN_VALID_DELTA_SECONDS = 0.001
+_SPARSE_DELTA_SECONDS = 0.250
+
 
 class BodySide(StrEnum):
     """Body side after handedness normalization."""
@@ -779,7 +783,7 @@ def _detect_motion_aware_phase_positions(
         frame_positions[id(analysis_frames[repaired_analysis_positions[3]])],
         frame_positions[id(analysis_frames[repaired_analysis_positions[4]])],
     )
-    cue_count = sum(1 for score in smoothed_scores if score > 0.02)
+    cue_count = sum(1 for score in smoothed_scores if score > _legacy_rate_threshold(0.02))
     quality_ratio = frame_quality.usable_frame_count / max(1, frame_quality.total_frame_count)
     confidence = 0.84 if cue_count >= 2 and active_window.fallback_reason is None else 0.58
     confidence = round(max(0.35, min(0.9, confidence * max(0.55, quality_ratio))), 3)
@@ -1005,7 +1009,7 @@ def _active_swing_window(
             confidence=0.0,
             fallback_reason="No pose frames were available for active swing window detection.",
         )
-    if not scores or max(scores) <= 0.02:
+    if not scores or max(scores) <= _legacy_rate_threshold(0.02):
         return SwingActiveWindowDiagnostics(
             start_frame_index=frames[0].frame_index,
             end_frame_index=frames[-1].frame_index,
@@ -1017,7 +1021,7 @@ def _active_swing_window(
             ),
         )
     peak_position = max(range(len(scores)), key=lambda position: scores[position])
-    threshold = max(0.02, max(scores) * 0.18)
+    threshold = max(_legacy_rate_threshold(0.02), max(scores) * 0.18)
     active_positions = [position for position, score in enumerate(scores) if score >= threshold]
     start = max(0, min(active_positions) - 1)
     end = min(len(frames) - 1, max(active_positions) + 1)
@@ -1218,7 +1222,7 @@ def _refined_impact_candidate_score(
         score *= 0.35
     elif contact_zone < 0.45 and position <= foot_strike_position + 1:
         score *= 0.7
-    if movement < 0.02 and contact_zone < 0.5:
+    if movement < _legacy_rate_threshold(0.02) and contact_zone < 0.5:
         score *= 0.6
     if (
         next_movement < movement * 0.35
@@ -1378,7 +1382,7 @@ def _stride_position(
         else None
     )
     for position in candidates:
-        if scores[position] >= 0.018:
+        if scores[position] >= _legacy_rate_threshold(0.018):
             return _StrideSelection(
                 position=position,
                 fallback_reason=fallback_reason or lift.fallback_reason,
@@ -1534,7 +1538,7 @@ def _stride_candidate_score(
     knee_load = _max_knee_displacement(setup, current, scale, measurement_space)
     hip_load = _hip_midpoint_displacement(setup, current, scale, measurement_space)
     head_controlled_move = _head_displacement(setup, current, scale, measurement_space)
-    rotation = _rotation_change(previous, current, measurement_space)
+    rotation = _rotation_change_rate(previous, current, measurement_space) / 45.0
     return (
         ankle_load * 0.38
         + knee_load * 0.20
@@ -1643,7 +1647,7 @@ def _plant_persists(
         if position < len(ankle_velocities)
         else 0.0
     )
-    if next_velocity > 0.04:
+    if next_velocity > _legacy_rate_threshold(0.04):
         return False
     if len(search_positions) < 3:
         return True
@@ -1654,7 +1658,10 @@ def _plant_persists(
     )
     if not check_positions:
         return True
-    return all(ankle_velocities[next_position] <= 0.045 for next_position in check_positions)
+    return all(
+        ankle_velocities[next_position] <= _legacy_rate_threshold(0.045)
+        for next_position in check_positions
+    )
 
 
 def _foot_strike_candidate_score(
@@ -1667,7 +1674,10 @@ def _foot_strike_candidate_score(
         ankle_velocities[position + 1] if position + 1 < len(ankle_velocities) else current_velocity
     )
     plant_deceleration = max(0.0, current_velocity - next_velocity)
-    stability = max(0.0, 1.0 - next_velocity / 0.04) * min(ankle_changes[position], 1.0)
+    stability = max(0.0, 1.0 - next_velocity / _legacy_rate_threshold(0.04)) * min(
+        ankle_changes[position],
+        1.0,
+    )
     return ankle_changes[position] * 0.35 + plant_deceleration * 0.45 + stability * 0.20
 
 
@@ -1713,7 +1723,9 @@ def _follow_through_position(
     for position in search_positions:
         if scores[position] >= threshold:
             reason = None
-            if position == search_positions[-1] and _movement_at(position, movement_scores) > 0.035:
+            if position == search_positions[-1] and _movement_at(
+                position, movement_scores
+            ) > _legacy_rate_threshold(0.035):
                 reason = (
                     "Follow-through finish may be outside the bounded swing window because "
                     "the last searched pose frame still showed motion."
@@ -1802,14 +1814,14 @@ def _movement_scores(
             measurement_space=measurement_space,
         )
         scale = scale or 0.25
-        grip_score = _point_velocity(previous, current, _grip_point, scale, measurement_space)
-        ankle_score = _ankle_velocity(previous, current, scale, measurement_space)
-        rotation_score = _rotation_change(previous, current, measurement_space)
+        grip_score = _point_velocity_rate(previous, current, _grip_point, scale, measurement_space)
+        ankle_score = _ankle_velocity_rate(previous, current, scale, measurement_space)
+        rotation_score = _rotation_change_rate(previous, current, measurement_space) / 45.0
         scores.append(grip_score * 0.6 + ankle_score * 0.25 + rotation_score * 0.15)
     return tuple(scores)
 
 
-def _point_velocity(
+def _point_velocity_rate(
     previous: PoseFrame,
     current: PoseFrame,
     getter: Callable[[PoseFrame, float], PoseKeypoint | None],
@@ -1820,16 +1832,22 @@ def _point_velocity(
     current_point = getter(current, 0.1)
     if previous_point is None or current_point is None:
         return 0.0
+    delta_seconds = _timestamp_delta_seconds(previous, current)
+    if delta_seconds is None:
+        return 0.0
     distance = measurement_space.distance(previous_point.point, current_point.point)
-    return distance / max(scale, 0.01)
+    return distance / max(scale, 0.01) / delta_seconds
 
 
-def _ankle_velocity(
+def _ankle_velocity_rate(
     previous: PoseFrame,
     current: PoseFrame,
     scale: float,
     measurement_space: SwingMeasurementSpace,
 ) -> float:
+    delta_seconds = _timestamp_delta_seconds(previous, current)
+    if delta_seconds is None:
+        return 0.0
     values: list[float] = []
     for side in (BodySide.LEFT, BodySide.RIGHT):
         name = side_keypoint(side, "ankle")
@@ -1838,7 +1856,9 @@ def _ankle_velocity(
         if previous_point is None or current_point is None:
             continue
         values.append(
-            measurement_space.distance(previous_point.point, current_point.point) / max(scale, 0.01)
+            measurement_space.distance(previous_point.point, current_point.point)
+            / max(scale, 0.01)
+            / delta_seconds
         )
     return max(values, default=0.0)
 
@@ -1861,24 +1881,33 @@ def _ankle_velocity_series(
             or 0.25
         )
         if lead_side is None:
-            values.append(_ankle_velocity(previous, current, scale, measurement_space))
+            values.append(_ankle_velocity_rate(previous, current, scale, measurement_space))
             continue
         previous_point = previous.get(side_keypoint(lead_side, "ankle"), min_confidence=0.1)
         current_point = current.get(side_keypoint(lead_side, "ankle"), min_confidence=0.1)
         if previous_point is None or current_point is None:
             values.append(0.0)
             continue
+        delta_seconds = _timestamp_delta_seconds(previous, current)
+        if delta_seconds is None:
+            values.append(0.0)
+            continue
         values.append(
-            measurement_space.distance(previous_point.point, current_point.point) / max(scale, 0.01)
+            measurement_space.distance(previous_point.point, current_point.point)
+            / max(scale, 0.01)
+            / delta_seconds
         )
     return tuple(values)
 
 
-def _rotation_change(
+def _rotation_change_rate(
     previous: PoseFrame,
     current: PoseFrame,
     measurement_space: SwingMeasurementSpace,
 ) -> float:
+    delta_seconds = _timestamp_delta_seconds(previous, current)
+    if delta_seconds is None:
+        return 0.0
     changes: list[float] = []
     for part in ("hip", "shoulder"):
         previous_vector = _side_to_side_vector(previous, part, 0.1)
@@ -1893,8 +1922,23 @@ def _rotation_change(
             current_vector[0].point,
             current_vector[1].point,
         )
-        changes.append(angle_difference_degrees(current_angle, previous_angle) / 45.0)
+        changes.append(angle_difference_degrees(current_angle, previous_angle) / delta_seconds)
     return max(changes, default=0.0)
+
+
+def _timestamp_delta_seconds(previous: PoseFrame, current: PoseFrame) -> float | None:
+    if previous.timestamp_seconds is None or current.timestamp_seconds is None:
+        return 1.0 / _REFERENCE_FPS
+    delta = current.timestamp_seconds - previous.timestamp_seconds
+    if not math.isfinite(delta) or delta < _MIN_VALID_DELTA_SECONDS:
+        return None
+    if delta > _SPARSE_DELTA_SECONDS:
+        return None
+    return delta
+
+
+def _legacy_rate_threshold(value_per_30fps_frame: float) -> float:
+    return value_per_30fps_frame * _REFERENCE_FPS
 
 
 def _ankle_displacement_from_setup(
@@ -2464,7 +2508,7 @@ def _hip_shoulder_separation_timing(
         )
     return SwingMetricValue(
         name=SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING,
-        value=float(shoulder_onset - hip_onset),
+        value=_timing_difference_milliseconds(frames[hip_onset], frames[shoulder_onset]),
         confidence=min(confidences),
         evidence_frames=(frames[hip_onset].frame_index, frames[shoulder_onset].frame_index),
     )
@@ -2625,3 +2669,9 @@ def _rotation_onset_index(angle_series: Sequence[tuple[int, float]]) -> int | No
         if angle_difference_degrees(angle, baseline) >= 5.0:
             return frame_position
     return None
+
+
+def _timing_difference_milliseconds(first: PoseFrame, second: PoseFrame) -> float:
+    if first.timestamp_seconds is None or second.timestamp_seconds is None:
+        return (second.frame_index - first.frame_index) / _REFERENCE_FPS * 1000.0
+    return (second.timestamp_seconds - first.timestamp_seconds) * 1000.0

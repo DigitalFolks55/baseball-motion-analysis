@@ -46,12 +46,30 @@ def test_swing_analysis_application_service_returns_analysis_and_feedback() -> N
 
     assert response.analysis.methodology_version == "swing_evaluation_v2"
     assert response.analysis.overall_score > 90.0
+    assert all(score.fault_deduction == 0.0 for score in response.analysis.phase_scores)
     assert any(
         metric.name.value == "normalized_stance_width" for metric in response.analysis.metrics
     )
     assert response.feedback.summary
     assert response.feedback.good_points
     assert response.feedback.confidence == response.analysis.confidence
+
+
+def test_swing_analysis_application_service_returns_fault_score_impact() -> None:
+    service = SwingAnalysisApplicationService()
+
+    response = service.analyze_pose_sequence(
+        AnalyzeSwingRequest(
+            frames=good_swing_frames(scenario="door_swing"),
+            handedness=SwingHandedness.RIGHT_HANDED,
+            phase_frames=GOOD_PHASES,
+        )
+    )
+
+    assert response.analysis.detected_faults
+    assert all(fault.linked_metrics for fault in response.analysis.detected_faults)
+    assert all(fault.deduction >= 0.0 for fault in response.analysis.detected_faults)
+    assert any(score.metric_deduction > 0.0 for score in response.analysis.phase_scores)
 
 
 def test_swing_video_analysis_application_service_estimates_pose_and_reuses_cache(

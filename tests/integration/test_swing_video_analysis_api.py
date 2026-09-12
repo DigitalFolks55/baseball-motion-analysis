@@ -49,6 +49,10 @@ def test_swing_video_analysis_endpoint_returns_events_overlay_and_cached_pose(
     first_payload = first_response.json()
     assert first_payload["analysis"]["overall_score"] >= 0.0
     assert first_payload["analysis"]["methodology_version"] == "swing_evaluation_v2"
+    assert {
+        "metric_deduction",
+        "fault_deduction",
+    }.issubset(first_payload["analysis"]["phase_scores"][0])
     assert any(
         metric["name"] == "normalized_stance_width"
         for metric in first_payload["analysis"]["metrics"]

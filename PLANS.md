@@ -125,7 +125,7 @@ DEV001-01 acceptance criteria:
 
 ### Milestone 2: Local Replay MVP
 
-Status: IN_PROGRESS
+Status: DONE
 
 Goals:
 
@@ -1723,6 +1723,373 @@ DEV006-07 UI update final-review-planning result:
   warning.
 * No release or deployment work was performed.
 
+DEV007-01 FPS-independent stored-video swing analysis and replay planning scope:
+
+Status: IN_PROGRESS
+
+Target feature:
+
+* Fix stored-video swing analysis and replay pose overlays so source frame rates other
+  than the current acceptable 30 FPS path do not change sampling coverage, pose
+  stabilization semantics, swing phase selection, scoring, timing metrics, or overlay
+  synchronization solely because the source FPS changed.
+* Keep 30 FPS behavior as the calibration reference for converted thresholds and
+  regression expectations unless a correction is documented during architecture or QA.
+* Support constant-frame-rate videos below, at, and above 30 FPS, and preserve or
+  diagnose variable or irregular frame timestamps when decoder timing data is available.
+
+Expected behavior:
+
+* `video` defines one timestamp policy for decoded source frames: `frame_index` remains
+  the stable decoded frame identifier, while `timestamp_seconds` is the presentation time
+  used by sampling, MediaPipe video mode, motion analysis, API diagnostics, and replay
+  overlay selection.
+* Video sampling is time-aware. Sources below the requested analysis cadence use each
+  source frame without upsampling; sources above the requested cadence are sampled close
+  to the requested cadence without integer-ratio oversampling; frame caps are applied
+  across the usable clip duration rather than by taking only the first eligible frames.
+* Sampling diagnostics distinguish source-reported FPS, requested analysis FPS, achieved
+  FPS, sampled and total frame counts, analyzed time range, source duration, cap status,
+  timestamp source, timestamp fallback or repair, and incomplete temporal coverage.
+* `pose` consumes monotonically increasing timestamped frames and converts frame-count
+  stabilization behavior to elapsed-time semantics for smoothing, interpolation
+  eligibility, outlier rejection, and high-velocity landmark protection. Notebook-parity
+  and raw diagnostic modes remain unstabilized as currently documented.
+* `motion` calculates movement rates with elapsed-time deltas and uses time-based
+  thresholds for active-window detection, stride/lift onset, foot-strike plant
+  persistence, estimated impact, follow-through search, and any helper that consumes
+  velocity, deceleration, movement, rotation onset, or temporal separation.
+* `analysis` preserves 30 FPS scoring intent by converting current per-frame thresholds
+  into documented time-based units, and it updates metric units consistently. In
+  particular, `hip_shoulder_separation_timing` must report a real-time unit such as
+  seconds or milliseconds instead of frame-position difference.
+* `app` owns quality-mode sampling defaults, pose-cache key correctness, browser-neutral
+  diagnostics, and overlay/event output. Any sampling or stabilization option that can
+  change pose output must be included in the in-memory pose cache key.
+* `api` serializes explicit timestamps, units, timing diagnostics, and limitations
+  without calculating timing or baseball rules.
+* `ui` selects pose-overlay frames by returned `timestamp_seconds`, uses
+  `requestVideoFrameCallback` and `mediaTime` when available, provides a bounded
+  fallback update loop, redraws after seek/load/play/pause/resize/result changes, and
+  cleans up callbacks so repeated video selection does not leak update loops.
+* Existing aspect-aware overlay coordinates, raw/stabilized overlay selection,
+  event labels, evaluation-line toggles, metric filtering, localization, accessibility,
+  media upload, replay, delete, and stored-video analysis workflows remain available.
+
+Architecture decisions to make:
+
+* Define the timestamp policy and OpenCV fallback behavior in a new ADR, including how
+  missing, duplicate, decreasing, negative, non-finite, repaired, or synthesized
+  timestamps are handled before MediaPipe video mode.
+* Decide whether higher-accuracy mode uses a stable maximum analysis cadence such as
+  30 FPS for all clips or continues to use all short-clip frames with fully
+  time-normalized downstream processing. The decision must explain user-value,
+  performance, cache, and cross-FPS accuracy tradeoffs.
+* Decide the public unit for `hip_shoulder_separation_timing` and document the API
+  contract change, threshold conversion from the 30 FPS baseline, UI labels, and
+  migration risk.
+* Decide whether existing frame-count MediaPipe configuration fields are replaced by
+  duration-based fields with compatibility behavior or documented as breaking
+  configuration changes. Do not keep frame-count names with time-unit behavior.
+* Decide whether OpenCV timing is sufficient for supported variable-frame-rate content.
+  Do not add a production decoder dependency unless architecture documents need,
+  alternatives, runtime impact, license, packaging, and deployment concerns.
+
+Non-goals:
+
+* Do not replace MediaPipe or introduce a new pose model.
+* Do not add bat, barrel, ball, or exact contact detection.
+* Do not redesign swing coaching rules beyond timing-unit conversions needed for FPS
+  independence.
+* Do not promise identical MediaPipe landmarks for differently encoded source files;
+  require consistent pipeline semantics and bounded downstream results for equivalent
+  deterministic pose trajectories.
+* Do not add video transcoding, fabricated frames, fabricated poses, frame
+  interpolation, FPS upsampling, fielding/throwing/pitching implementations, hosted
+  services, cloud uploads, telemetry, authentication, mobile adapters, Docker, PyPI
+  publishing, version tags, GitHub Releases, or deployment work.
+* Do not commit private media, large video fixtures, model files, generated reports,
+  credentials, `.env` files, or unrelated user changes.
+
+Acceptance criteria:
+
+* Equivalent deterministic swing trajectories sampled at 24, 30, 60, and 120 FPS select
+  setup, stride, foot strike, estimated impact, and follow-through at equivalent
+  timestamps within narrow documented tolerances.
+* Equivalent deterministic trajectories produce consistent time-based movement rates,
+  timing metrics, severities, detected faults, phase scores, and overall scores within
+  documented numeric tolerances that do not hide a phase or scoring-category regression.
+* Existing acceptable 30 FPS behavior remains covered as the calibration reference.
+* Time-aware video sampling does not unexpectedly exceed requested target FPS because of
+  integer-ratio rounding and does not analyze only the prefix when a frame cap applies.
+* Selected source frame indexes and timestamps are ordered, unique, deterministic, and
+  represent first and final usable temporal regions under a cap.
+* Decoder timestamps are preserved when reliable; synthesized or repaired timestamps are
+  explicit in diagnostics and limitations; MediaPipe receives valid monotonically
+  increasing timestamps.
+* Pose stabilization uses elapsed-time semantics and behaves comparably across tested
+  cadences while preserving legitimate fast wrist and ankle motion.
+* `hip_shoulder_separation_timing` and any other timing output use explicit real-time
+  units across domain models, analysis, API serialization, UI labels, docs, and tests.
+* Replay pose overlays are selected by timestamp, updated against presented video frames
+  where supported, redrawn reliably on fallback browsers and seeking, and do not leave
+  duplicate callback loops after media/result changes.
+* Sampling and timing diagnostics are visible in the diagnostics area, keep English and
+  Japanese UI strings isolated, and do not expose absolute local paths or private media
+  details.
+* Required docs, tests, quality gates, and final planning review are completed, and no
+  release or deployment is created.
+
+Test expectations:
+
+* Add video sampling unit tests for constant source FPS values 24, 30, 40, 50, 60, and
+  120 FPS; below-target and above-target sources; 40-to-30 non-integer cadence; full
+  duration cap coverage; missing FPS with valid timestamps; missing timestamps with
+  valid FPS; duplicate, decreasing, negative, non-finite, and irregular timestamps; and
+  diagnostics/limitations.
+* Add deterministic motion/analysis tests using one continuous synthetic swing
+  trajectory resampled at 24, 30, 60, 120 FPS plus an irregular timestamp variant. Tests
+  must assert phase timestamp equivalence, movement-rate equivalence, real-time
+  hip/shoulder timing units, metric-score/fault consistency, invalid timestamp fallback,
+  and preserved 30 FPS behavior.
+* Add pose stabilization tests proving smoothing duration, interpolation gap duration,
+  outlier rejection, high-velocity wrist/ankle preservation, and stabilized coordinates
+  are comparable across FPS.
+* Add application/API tests for diagnostics serialization, analyzed time range,
+  achieved FPS, timestamp source/fallback, timing unit changes, and pose-cache separation
+  for materially different temporal sampling options.
+* Add meaningful JavaScript tests or extracted pure helper tests for timestamp-based
+  overlay frame selection, exact-versus-nearest status tolerance, sparse sampled frames,
+  irregular timestamps, requestVideoFrameCallback lifecycle, seek redraw, fallback loop
+  behavior, and removal of the `currentTime * fps` overlay dependency.
+* Keep tests deterministic with synthetic poses, fake capture/decoder objects, and tiny
+  generated video fixtures only. Optional local non-private manual clip checks may be
+  reported but must not replace automated tests or commit media.
+
+Required documentation updates:
+
+* `docs/01_product/feature_catalog.md`
+* `docs/02_architecture/system_overview.md`
+* a new ADR under `docs/02_architecture/adr/` for FPS/timestamp/sampling and
+  time-normalized analysis policy
+* relevant existing ADRs, especially ADR-0007, ADR-0008, ADR-0011, and ADR-0012 where
+  superseded statements exist
+* `docs/03_development_log/` with a dated Obsidian-compatible entry
+* `docs/04_motion_knowledge/swing.md`
+* `docs/05_manuals/local_media_input_foundation.md`
+* `docs/05_manuals/swing_motion_analysis_ui.md`
+
+Planning cautions for implementation:
+
+* Treat this as a cross-layer timing contract fix, not only a browser display issue.
+  Fixing the overlay without normalizing sampling, stabilization, event detection, and
+  timing metrics would leave the reported analysis dependent on source FPS.
+* Be careful with OpenCV timestamp support: record explicit diagnostics if presentation
+  timestamps are synthesized or repaired, and keep interfaces ready for a future decoder
+  that supplies better VFR timestamps.
+* Narrow tolerances must be chosen before broad test rewrites so tests do not simply
+  encode the current broken frame-count behavior.
+* Cached pose results must vary by all timing-affecting sampling and stabilization
+  options, not only media ID, quality mode, and pose mode.
+* Do not put motion thresholds, scoring logic, or timestamp repair logic in UI or API
+  adapters.
+
+DEV007-01 final-review-planning result:
+
+* Implementation follows ADR-0013: video owns timestamp normalization and full-duration
+  sampling, pose owns duration-based stabilization, motion owns elapsed-time swing
+  helpers, analysis owns converted thresholds/units, and API/UI layers serialize or
+  render returned timing data.
+* Confirmed defects are covered by implementation changes and regression tests for
+  full-duration sampling, 24/30/40/50/60/120 FPS cadence behavior, timestamp
+  fallback/repair diagnostics, duration-based interpolation/smoothing, millisecond
+  hip/shoulder timing, cache-key temporal options, API diagnostics, and browser
+  timestamp overlay selection.
+* `hip_shoulder_separation_timing` now reports milliseconds, with the 30 FPS one-frame
+  reference converted to `33.333` milliseconds.
+* Browser overlay matching uses returned `timestamp_seconds` and presented-frame
+  callbacks where available, with a bounded animation-frame fallback and cleanup on
+  playback state changes.
+* Documentation is updated in product, architecture, ADR, development log, motion
+  knowledge, and manuals.
+* Required quality commands passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* No release, deployment, Docker setup, hosted service, package publication, version tag,
+  GitHub Release, private media, model file, credential, `.env` file, or generated
+  report artifact was created.
+* Remaining risks are non-blocking follow-up work: OpenCV timestamp reliability still
+  depends on container/backend behavior, and real calibrated swing fixtures are still
+  needed for biomechanical threshold refinement.
+
+DEV007-02 revise score to consider detected faults planning scope:
+
+Status: DONE
+
+Target feature:
+
+* Revise swing v2 scoring so Detected Faults are explicitly accounted for in the
+  100-point score instead of only affecting feedback, improvement priorities, drills,
+  and browser display.
+* Preserve the existing service-oriented boundary: `analysis` owns score calculation,
+  fault scoring, thresholds, confidence handling, and issue detection; `feedback` turns
+  returned results into cautious language; `app`, `api`, and `ui` orchestrate, serialize,
+  and render without calculating baseball scoring rules.
+* Keep the public scoring model explainable for players, coaches, and parents by making
+  metric deductions, fault deductions or adjustments, phase scores, overall score,
+  confidence, and limitations tell a consistent story.
+
+Confirmed current issue:
+
+* Current swing v2 analysis evaluates metric deductions, detects faults, then computes
+  phase scores and overall score from metrics only.
+* Most Detected Faults correlate with lower scores because they are derived from weak
+  metrics, but they do not independently affect `phase_scores` or `overall_score`.
+* Some secondary fault evidence is not currently represented as a scored metric, such as
+  wrist-to-chest distance evidence for door swing / casting and lead-knee forward-drift
+  evidence for collapsed lead side. These faults can be visible without a clear score
+  impact.
+
+Expected behavior:
+
+* A new documented fault-aware scoring model defines how Detected Faults affect score.
+* Metric-backed faults do not receive uncontrolled duplicate penalties on top of the
+  metric deductions that already triggered them.
+* Secondary evidence that is not currently a scored metric can lower the relevant phase
+  score or an explicit score adjustment when evidence is sufficiently supported.
+* Fault severity, confidence, phase, evidence availability, and skipped/unavailable
+  impact status are handled consistently.
+* Phase scores and overall score remain bounded from 0 to 100.
+* Missing or not-evaluated evidence reduces confidence or adds limitations rather than
+  silently applying full penalties.
+* Impact-phase fault penalties are not applied when impact-phase faults are suppressed
+  because impact is skipped or unavailable.
+* Any new score-impact fields are exposed through application/API responses and rendered
+  by the browser only as returned data.
+* Feedback and drill suggestions remain cautious and fault-based, and improvement
+  priorities align with the highest-impact score contributors.
+
+Architecture decisions to make:
+
+* Decide whether faults become phase-level additional deductions, separate fault
+  adjustments, metric-linked score-impact metadata, or another explicit model.
+* Decide how much incremental score impact metric-backed faults can add without double
+  counting.
+* Decide how secondary fault evidence maps to score impact, including severity,
+  confidence, phase weight, and caps.
+* Decide whether public response models need fault-level deduction fields, linked metric
+  names, phase metric-versus-fault deductions, total fault adjustment, or a
+  score-explanation structure.
+* Document the decision in a new ADR or a clearly scoped amendment to the v2 scoring ADR.
+
+Non-goals:
+
+* Do not add bat, barrel, ball, or exact contact detection.
+* Do not add new swing fault categories unless required to make existing scoring
+  explainable.
+* Do not redesign swing event detection, pose estimation, video sampling, timestamp
+  policy, replay overlays, or MediaPipe configuration.
+* Do not change fielding, throwing, or pitching analysis.
+* Do not move scoring formulas, baseball thresholds, severity mappings, or drill
+  decisions into UI, API routes, storage adapters, or browser JavaScript.
+* Do not add hosted services, cloud upload, telemetry, authentication, deployment,
+  Docker, PyPI publishing, version tags, GitHub Releases, or release work.
+* Do not commit private media, large video fixtures, model files, generated reports,
+  credentials, `.env` files, or unrelated user changes.
+
+Acceptance criteria:
+
+* Detected Faults have an explicit, documented relationship to phase scores and overall
+  score.
+* Secondary fault evidence that is not currently a scored metric can lower the relevant
+  score when the detected fault is sufficiently supported.
+* Metric-backed faults do not cause uncontrolled double counting.
+* Phase scores and overall score are computed from the documented model and remain
+  bounded from 0 to 100.
+* Confidence and limitations still distinguish weak evidence from confirmed issues.
+* Impact-phase fault penalties are not applied when impact faults are suppressed by
+  skipped or unavailable impact status.
+* Application service and API responses expose any required score-impact information
+  without moving scoring logic outside `analysis`.
+* Browser UI renders any new score explanation data without calculating baseball rules.
+* Feedback remains cautious and consistent with score contributors.
+* Unit, integration, API, feedback, and UI tests cover the new semantics.
+* Relevant docs, quality gates, and final planning review are completed, and no release
+  or deployment is created.
+
+Test expectations:
+
+* Add analysis unit tests proving good swings still score near 100, each existing fault
+  candidate can affect score through the documented model, metric-backed faults are not
+  uncapped double-counted, secondary-evidence-only faults lower score, severe faults
+  have greater impact than comparable warning faults, low-confidence evidence has lower
+  impact or confidence treatment, skipped impact suppresses hidden impact penalties,
+  missing metrics reduce confidence or limitations, and scores remain bounded.
+* Add application/API tests proving service responses and schemas expose any new
+  score-impact fields while preserving `overall_score`, `phase_scores`, `metrics`, and
+  `detected_faults`.
+* Add feedback tests proving improvement points and drills remain fault-based and
+  score-consistent.
+* Add UI tests for any new score-impact labels, score explanation rows, localization
+  strings, or display changes.
+
+Required documentation updates:
+
+* `PLANS.md`
+* `docs/01_product/feature_catalog.md`
+* `docs/02_architecture/system_overview.md`
+* a new or amended ADR under `docs/02_architecture/adr/`
+* `docs/03_development_log/` with a dated Obsidian-compatible entry
+* `docs/04_motion_knowledge/swing.md`
+* `docs/05_manuals/swing_motion_analysis_ui.md`
+
+Planning cautions for implementation:
+
+* Treat this as a scoring semantics change, not a browser display change.
+* Do not make the score harsher by simply adding full independent penalties for every
+  displayed fault; double-counting must be consciously prevented and tested.
+* Keep secondary fault evidence score-relevant so the score does not contradict the
+  visible Detected Faults section.
+* Keep score confidence separate from score value: uncertain evidence should not look
+  like a confirmed severe deduction.
+* Do not put fault scoring weights or thresholds in UI or API adapters.
+
+DEV007-02 final-review-planning result:
+
+* ADR-0014 documents the selected model: Detected Faults are score-relevant through
+  capped phase-local fault deductions, with linked metric deductions credited first to
+  prevent uncontrolled double counting.
+* `analysis` now owns fault-aware scoring. Fault results expose linked metrics and
+  overall score-point deduction; phase scores expose metric and fault deduction
+  components.
+* Secondary evidence paths such as wrist-to-chest distance and lead-knee forward drift
+  can lower score when they trigger supported faults.
+* Suppressed impact-phase faults still produce no hidden impact fault deduction when
+  impact is skipped or unavailable.
+* API schemas serialize returned fault score impact and phase deduction components.
+* Browser UI renders returned score-impact fields and localized labels without
+  calculating baseball scoring rules.
+* Feedback remains cautious and fault-based, with improvement priorities ordered by
+  linked metric plus fault score impact.
+* Documentation is updated in product, architecture, ADR, development log, motion
+  knowledge, and manual files.
+* Required quality commands passed:
+  * `node --check src/baseball_motion_analysis/ui/web/static/app.js`
+  * `uv run ruff check .`
+  * `uv run ruff format --check .`
+  * `uv run mypy src`
+  * `uv run pytest`
+* Full pytest passed with 131 tests and one existing Starlette/httpx deprecation
+  warning.
+* No release, deployment, Docker setup, hosted service, package publication, version tag,
+  GitHub Release, private media, model file, credential, `.env` file, or generated
+  report artifact was created.
+* Remaining risk is non-blocking follow-up work: fault caps are provisional until
+  calibrated with validated non-private swing fixtures.
+
 ### Milestone 8: Release Preparation
 
 Status: IN_PROGRESS
@@ -1862,6 +2229,16 @@ Acceptance criteria:
 | T-0109 | Implement swing result section order UI update | coding | DONE | Moved Detected Faults between Feedback and Detected Events And Phase Scores |
 | T-0110 | QA swing result section order UI update | quality-assurance | DONE | Static UI order test updated; JS, Ruff, format, mypy, and full pytest pass |
 | T-0111 | Final review swing result section order UI update | final-review-planning | DONE | DEV006-07 acceptance criteria verified; release/deployment intentionally skipped |
+| T-0112 | Plan FPS-independent swing analysis and replay | planning | DONE | DEV007-01 scope, acceptance criteria, risks, docs, and handoff cautions documented |
+| T-0113 | Design FPS timestamp and sampling policy | architecture | DONE | ADR-0013 accepted; higher-accuracy uses 30 FPS max cadence, timing uses timestamps/milliseconds, and OpenCV/VFR fallbacks are diagnosed |
+| T-0114 | Implement FPS-independent timing pipeline | coding | DONE | Updated video sampling, pose stabilization, motion timing, app/API diagnostics/cache, and browser overlay sync |
+| T-0115 | QA FPS-independent analysis and replay | quality-assurance | DONE | Added cross-FPS sampling, motion, pose, service/API, and JS overlay tests; required gates pass |
+| T-0116 | Final review FPS-independent analysis and replay | final-review-planning | DONE | DEV007-01 acceptance criteria verified; no release/deployment |
+| T-0117 | Plan fault-aware swing scoring | planning | DONE | DEV007-02 scope, acceptance criteria, tests, docs, and scoring cautions documented |
+| T-0118 | Design fault-aware swing scoring | architecture | DONE | ADR-0014 accepted capped fault deductions with linked metric credits |
+| T-0119 | Implement fault-aware swing scoring | coding | DONE | Updated analysis scoring, API schemas, and browser score-impact rendering |
+| T-0120 | QA fault-aware swing scoring | quality-assurance | DONE | Added unit/app/API/feedback/UI tests; required quality gates pass |
+| T-0121 | Final review fault-aware swing scoring | final-review-planning | DONE | DEV007-02 acceptance criteria verified; no release/deployment |
 
 ## Open Decisions
 
@@ -1878,6 +2255,8 @@ Acceptance criteria:
 | D-0009 | Video-driven swing pose estimator | Accepted for DEV003-04 | architecture | Local deterministic heuristic estimator plus pose-estimator interface; no external model dependency |
 | D-0010 | MediaPipe pose estimator backend | Accepted for DEV003-05 | architecture | MediaPipe Pose Landmarker as first real local player-body pose backend |
 | D-0011 | Swing pose parity diagnostics | Accepted for DEV003-07 | architecture | Notebook-parity raw landmarks plus stabilized analysis overlay diagnostics |
+| D-0012 | FPS timestamp and sampling policy | Accepted | architecture | docs/02_architecture/adr/ADR-0013-fps-independent-timestamp-sampling-and-analysis.md |
+| D-0013 | Fault-aware swing scoring | Accepted | architecture | docs/02_architecture/adr/ADR-0014-fault-aware-swing-scoring.md |
 
 ## Risk Register
 
@@ -1900,6 +2279,10 @@ Acceptance criteria:
 | Overlay points may be mistaken for detected video pose         | Medium | Label overlay source and demo pose data; do not claim uploaded-video extraction |
 | Heuristic pose estimation is not production-quality            | High   | Report limitations, use interface boundary, and keep future model adapter isolated |
 | Pose cache may become stale within a session                   | Medium | Key cache by media ID and sampling options; clear when media is deleted or app restarts |
+| Source FPS changes may change swing phase selection and scores | High   | Use timestamp-based sampling, elapsed-time motion thresholds, and cross-FPS deterministic regression tests |
+| Frame caps may analyze only a video prefix                     | High   | Apply caps across the full usable clip duration and expose analyzed time range diagnostics |
+| Variable-frame-rate timestamps may be unreliable through OpenCV | Medium | Preserve decoder timestamps when valid, synthesize or repair with explicit diagnostics, and keep decoder interfaces replaceable |
+| Browser pose overlays may drift from presented video frames    | Medium | Select overlays by timestamp and use requestVideoFrameCallback with a tested fallback loop |
 
 ## Definition of Done
 

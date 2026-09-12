@@ -41,6 +41,39 @@ class FrameSamplingOptions:
 
 
 @dataclass(frozen=True)
+class FrameTimestampDiagnostics:
+    """Timestamp provenance and repair details for decoded frames."""
+
+    timestamp_source: str
+    timestamp_fallback_reason: str | None = None
+    timestamp_repair_count: int = 0
+    limitations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FrameSamplingDiagnostics:
+    """Diagnostics for timestamp-aware frame sampling."""
+
+    source_fps: float | None
+    requested_fps: float | None
+    achieved_fps: float | None
+    sampled_frame_count: int
+    total_frame_count: int | None
+    source_duration_seconds: float | None
+    analyzed_start_seconds: float | None
+    analyzed_end_seconds: float | None
+    analyzed_duration_seconds: float | None
+    max_frame_count: int | None
+    cap_applied: bool
+    full_frame_sampling: bool
+    temporal_coverage_complete: bool
+    timestamp_source: str
+    timestamp_fallback_reason: str | None = None
+    timestamp_repair_count: int = 0
+    limitations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class VideoMetadata:
     """Metadata shared by recorded videos, image sequences, and camera streams."""
 
@@ -51,6 +84,8 @@ class VideoMetadata:
     total_frame_count: int | None
     duration_seconds: float | None
     warnings: tuple[str, ...] = ()
+    timestamp_diagnostics: FrameTimestampDiagnostics | None = None
+    sampling_diagnostics: FrameSamplingDiagnostics | None = None
 
 
 @dataclass(frozen=True)

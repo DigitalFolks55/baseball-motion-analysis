@@ -102,7 +102,8 @@ The returned `FrameSequence` contains sampled frames. It does not contain pose-e
 
 - `sample_every_n_frames`: sample every N frames. Default is `1`.
 - `target_fps`: sample close to a target frames-per-second rate when source fps is known.
-- `max_frame_count`: stop after this many sampled frames.
+- `max_frame_count`: cap the number of sampled frames while preserving the usable clip
+  time range.
 
 Example:
 
@@ -122,7 +123,19 @@ sequence = service.load_video_file(
 )
 ```
 
-If both `sample_every_n_frames` and `target_fps` are provided, the implementation uses the stricter interval so sampling does not exceed the requested target.
+Sampling is timestamp-aware. When source FPS is below the requested target, every source
+frame is used and the loader does not fabricate frames. When source FPS is above the
+requested target, selected frames are distributed across the usable source timeline so
+the first and final temporal regions remain eligible for later analysis. A
+`max_frame_count` cap is applied across the full clip instead of taking only the first
+matching frames.
+
+`FrameData.frame_index` remains the decoded source-frame identifier.
+`FrameData.timestamp_seconds` is the presentation time used by pose estimation, motion
+analysis, and replay overlays. OpenCV decoder timestamps are used when valid and
+monotonic. If they are missing or invalid and valid FPS metadata exists, timestamps are
+synthesized from constant FPS metadata and this fallback is reported through
+`sequence.metadata.timestamp_diagnostics` and `sequence.metadata.sampling_diagnostics`.
 
 ## Loading an Image Sequence
 

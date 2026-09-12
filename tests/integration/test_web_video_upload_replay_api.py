@@ -1,3 +1,5 @@
+import subprocess
+import textwrap
 from pathlib import Path
 
 import cv2
@@ -218,7 +220,7 @@ def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None
     listener_start = script.text.index('evaluationMetricMenu.addEventListener("change"')
     listener_body = script.text[listener_start : listener_start + 260]
     assert "syncSelectedEvaluationMetricsFromMenu(event.target);" in listener_body
-    assert "drawPoseOverlay();" in listener_body
+    assert "redrawPoseOverlayAt(videoPlayer.currentTime);" in listener_body
     sync_function = "function syncSelectedEvaluationMetricsFromMenu(changedCheckbox)"
     sync_start = script.text.index(sync_function)
     sync_body = script.text[sync_start : sync_start + 520]
@@ -231,6 +233,57 @@ def test_web_ui_evaluation_metric_filter_static_behavior(tmp_path: Path) -> None
     assert "clearAnalysis" not in listener_body
     assert 'evaluationMetricToggle.addEventListener("click"' in script.text
     assert 'document.addEventListener("keydown"' in script.text
+
+
+def test_web_ui_overlay_timing_helpers_select_by_timestamp() -> None:
+    script_path = Path(__file__).parents[2] / "src/baseball_motion_analysis/ui/web/static/app.js"
+    node_script = textwrap.dedent(
+        f"""
+        const fs = require("fs");
+        const assert = require("assert");
+        const source = fs.readFileSync({str(script_path)!r}, "utf8");
+        function extractFunction(name) {{
+          const start = source.indexOf(`function ${{name}}`);
+          assert.notStrictEqual(start, -1, `${{name}} was not found`);
+          let depth = 0;
+          let seenBody = false;
+          for (let index = start; index < source.length; index += 1) {{
+            const char = source[index];
+            if (char === "{{") {{
+              depth += 1;
+              seenBody = true;
+            }} else if (char === "}}") {{
+              depth -= 1;
+              if (seenBody && depth === 0) {{
+                return source.slice(start, index + 1);
+              }}
+            }}
+          }}
+          throw new Error(`${{name}} body was not closed`);
+        }}
+        eval(extractFunction("isFiniteNumber"));
+        eval(extractFunction("nearestOverlayFrameByTimestamp"));
+        eval(extractFunction("overlayExactToleranceSeconds"));
+        const frames = [
+          {{ frame_index: 0, timestamp_seconds: 0.000 }},
+          {{ frame_index: 8, timestamp_seconds: 0.265 }},
+          {{ frame_index: 16, timestamp_seconds: 0.530 }},
+        ];
+        assert.strictEqual(nearestOverlayFrameByTimestamp(frames, 0.260).frame_index, 8);
+        assert.strictEqual(nearestOverlayFrameByTimestamp(frames, 0.3975).frame_index, 8);
+        assert.strictEqual(overlayExactToleranceSeconds(frames), 0.010);
+        assert(!source.includes("round(currentTime * manifest.fps"));
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "-e", node_script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_web_ui_japanese_localization_static_behavior(tmp_path: Path) -> None:
@@ -275,6 +328,9 @@ def test_web_ui_evidence_cells_are_bounded_and_scrollable(tmp_path: Path) -> Non
     assert script.status_code == 200
     assert styles.status_code == 200
     assert "metrics-evidence-column" in script.text
+    assert "metric_deduction" in script.text
+    assert "fault_deduction" in script.text
+    assert "Score impact" in script.text
     metrics_evidence_call = (
         'appendScrollableCell(\n      row,\n      (metric.evidence_frames ?? []).join(", ")'
     )

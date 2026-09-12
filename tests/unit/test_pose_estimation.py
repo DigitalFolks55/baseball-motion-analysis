@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from baseball_motion_analysis.pose import (
     HeuristicPoseEstimator,
@@ -66,8 +67,8 @@ def test_mediapipe_default_and_notebook_parity_configs_are_single_pose_raw_modes
     assert default_config.num_poses == 1
     assert parity_config.num_poses == 1
     assert parity_config.processing_mode == "notebook_parity"
-    assert parity_config.smoothing_window == 1
-    assert parity_config.max_interpolation_gap_frames == 0
+    assert parity_config.smoothing_window_seconds == 0.0
+    assert parity_config.max_interpolation_gap_seconds == 0.0
     assert parity_config.outlier_rejection_enabled is False
 
 
@@ -299,6 +300,35 @@ def test_smoothing_preserves_high_velocity_ankle_motion() -> None:
     assert middle_ankle.smoothed is False
 
 
+def test_stabilization_duration_settings_are_comparable_across_fps() -> None:
+    ten_fps_frames = tuple(
+        _pose_frame_with_centered_nose(index, index / 10.0) for index in range(5)
+    )
+    sixty_fps_frames = tuple(
+        _pose_frame_with_centered_nose(index, index / 60.0) for index in range(5)
+    )
+
+    ten_fps_stabilized, _limitations, ten_fps_diagnostics = stabilize_pose_frames(
+        ten_fps_frames,
+        MediaPipePoseEstimatorConfig(
+            smoothing_window_seconds=0.1,
+            outlier_rejection_enabled=False,
+        ),
+    )
+    sixty_fps_stabilized, _limitations, sixty_fps_diagnostics = stabilize_pose_frames(
+        sixty_fps_frames,
+        MediaPipePoseEstimatorConfig(
+            smoothing_window_seconds=0.1,
+            outlier_rejection_enabled=False,
+        ),
+    )
+
+    assert ten_fps_diagnostics.smoothed_frame_count == 0
+    assert sixty_fps_diagnostics.smoothed_frame_count > ten_fps_diagnostics.smoothed_frame_count
+    assert ten_fps_stabilized[2].keypoints[PoseKeypointName.NOSE].point.x == pytest.approx(0.52)
+    assert sixty_fps_stabilized[2].keypoints[PoseKeypointName.NOSE].point.x == pytest.approx(0.52)
+
+
 def test_mediapipe_pose_estimator_tracks_each_sampled_frame_with_injected_landmarker() -> None:
     frames = tuple(_frame(index) for index in range(3))
     landmarker = FakeLandmarker()
@@ -458,6 +488,19 @@ def _pose_frame_with_left_wrist(frame_index: int, wrist_x: float) -> PoseFrame:
     return PoseFrame(
         frame_index=frame_index,
         timestamp_seconds=frame_index / 30.0,
+        keypoints=base,
+    )
+
+
+def _pose_frame_with_centered_nose(frame_index: int, timestamp_seconds: float) -> PoseFrame:
+    base = dict(_pose_frame_with_left_wrist(frame_index, 0.4).keypoints)
+    base[PoseKeypointName.NOSE] = PoseKeypoint(
+        Point2D(0.5 + frame_index * 0.01, 0.2),
+        confidence=0.9,
+    )
+    return PoseFrame(
+        frame_index=frame_index,
+        timestamp_seconds=timestamp_seconds,
         keypoints=base,
     )
 

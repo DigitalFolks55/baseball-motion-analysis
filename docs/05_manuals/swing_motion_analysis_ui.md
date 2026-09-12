@@ -113,8 +113,8 @@ BMA_MEDIAPIPE_MIN_POSE_DETECTION_CONFIDENCE=0.5
 BMA_MEDIAPIPE_MIN_POSE_PRESENCE_CONFIDENCE=0.5
 BMA_MEDIAPIPE_MIN_TRACKING_CONFIDENCE=0.5
 BMA_MEDIAPIPE_MIN_LANDMARK_CONFIDENCE=0.3
-BMA_MEDIAPIPE_SMOOTHING_WINDOW=3
-BMA_MEDIAPIPE_MAX_INTERPOLATION_GAP_FRAMES=2
+BMA_MEDIAPIPE_SMOOTHING_WINDOW_SECONDS=0.100
+BMA_MEDIAPIPE_MAX_INTERPOLATION_GAP_SECONDS=0.067
 BMA_MEDIAPIPE_OUTLIER_REJECTION_ENABLED=true
 BMA_MEDIAPIPE_OUTLIER_DISTANCE_RATIO=0.75
 BMA_MEDIAPIPE_HIGH_VELOCITY_SMOOTHING_LIMIT_RATIO=0.8
@@ -127,16 +127,21 @@ BMA_MEDIAPIPE_RUNTIME_DELEGATE=cpu
 CPU is the default runtime delegate because stable local execution is preferred over
 faster but more fragile GPU initialization.
 
+The older `BMA_MEDIAPIPE_SMOOTHING_WINDOW` and
+`BMA_MEDIAPIPE_MAX_INTERPOLATION_GAP_FRAMES` frame-count settings are still accepted as
+a compatibility path when the duration settings are not set. Their values are converted
+using the 30 FPS calibration reference.
+
 ### Quality Mode
 
 Choose a swing analysis quality mode:
 
-- `Higher accuracy`: samples more frames and can process every original frame for short
-  clips under the configured cap.
+- `Higher accuracy`: uses a stable maximum analysis cadence of 30 FPS with a 180-frame
+  cap applied across the full usable clip.
 - `Balanced`: uses fewer frames than higher accuracy while still preserving more motion
-  events than faster mode.
+  events than faster mode. The default target is 24 FPS with a 120-frame cap.
 - `Faster`: reduces local runtime but can miss foot strike, estimated impact, or quick
-  hand movement.
+  hand movement. The default target is 12 FPS with a 60-frame cap.
 
 ### Estimated Impact
 
@@ -202,11 +207,12 @@ POST /api/v1/analysis/swing/video
 The application service:
 
 - Resolves the stored video by media ID.
-- Samples video frames with higher-accuracy defaults: full-frame processing for short
-  clips under the safe cap, otherwise a higher target FPS with a configurable cap.
+- Samples video frames with timestamp-aware quality-mode defaults. Higher accuracy uses
+  a 30 FPS maximum analysis cadence, lower-FPS sources use every available source frame,
+  and frame caps are distributed across the full usable clip rather than only the prefix.
 - Tracks MediaPipe body pose for every sampled frame.
 - Stabilizes pose observations with outlier rejection, short-gap interpolation, and
-  smoothing.
+  smoothing windows expressed as real-time durations.
 - Reuses in-memory cached pose results for repeated runs with the same media ID and
   sampling options.
 - Automatically selects swing event frames from stable pre-motion posture, lead-leg lift
@@ -244,34 +250,46 @@ Results appear in the `Motion Analysis` panel.
 - `Improvement Points`: likely areas to improve.
 - `Drills`: suggested practice actions tied to detected swing faults.
 - `Detected Faults`: fault candidates, affected phases, severity, evidence, and evidence
-  frames.
+  frames. Faults also show returned score impact and linked metrics. A fault may have
+  zero extra score impact when its linked metrics already accounted for the issue.
 - `Detected Events And Phase Scores`: automatically selected setup, stride, foot strike,
   impact, and follow-through event frames plus event confidence, detection method, phase
-  scoring, score confidence, and fallback reason when event ordering or quality is weak.
-  Event confidence comes from motion phase detection; score confidence comes from the
-  pose/keypoint evidence used by phase scoring. Impact is shown as estimated in normal
-  browser results because ball/contact evidence is not detected.
+  scoring, metric deduction, fault deduction, score confidence, and fallback reason when
+  event ordering or quality is weak. Event confidence comes from motion phase detection;
+  score confidence comes from the pose/keypoint evidence used by phase scoring. Impact is
+  shown as estimated in normal browser results because ball/contact evidence is not
+  detected.
 - `Metrics`: v2 measured values, units, target ranges, severity, deductions, and
   evidence frames. Explicit advanced API requests that skip or require contact evidence
   can still mark contact-specific metrics as `Not evaluated`, but that is not the normal
-  browser workflow.
+  browser workflow. Motion rates are interpreted in body scales per second or degrees
+  per second internally. Hip/shoulder timing is returned in milliseconds; the 30 FPS
+  baseline one-frame lag is `33.333` milliseconds.
 - `Diagnostics`: a foldable section at the bottom of motion analysis. It contains:
   `Limitations` for sampling limits, missing or low-confidence MediaPipe landmarks,
   missing bat evidence, fallback event detection, or 2D camera constraints; and
-  `Pose Quality` for effective FPS, sampled frame count, pose detection ratio, required
-  landmark coverage, mean/min confidence, smoothed frames, interpolated frames, rejected
-  outliers, raw pose coverage, requested pose count, selected candidate indexes,
-  candidate switch/ambiguity counts, processing mode, stabilization deltas, swing
-  frame-quality counts, active swing window range, peak motion frame, and the number of
-  metrics with pose-quality concerns in their scoring evidence.
+  `Pose Quality` for source FPS, requested analysis FPS, achieved FPS, sampled and total
+  frame counts, analyzed time range, timestamp source/fallback/repair status, pose
+  detection ratio, required landmark coverage, mean/min confidence, smoothed frames,
+  interpolated frames, rejected outliers, raw pose coverage, requested pose count,
+  selected candidate indexes, candidate switch/ambiguity counts, processing mode,
+  stabilization deltas, swing frame-quality counts, active swing window range, peak
+  motion frame, and the number of metrics with pose-quality concerns in their scoring
+  evidence.
 
 Feedback is cautious. Treat it as a local rule-based review aid, not a medical diagnosis
 or guaranteed coaching truth.
 
+Swing scoring is fault-aware. Metric deductions are credited first. Detected faults add
+only a bounded additional deduction based on phase, severity, and confidence, so a
+metric-backed fault is not counted as a full duplicate penalty. Secondary evidence that
+is not itself a scored metric can still affect the score when it triggers a supported
+fault.
+
 ## Replay Overlay
 
 After analysis completes, the replay panel draws detected pose data on top of the
-rendered video content rectangle for the sampled pose frame nearest the current replay
+rendered video content rectangle for the sampled pose frame nearest the presented video
 time.
 
 The overlay can show:
@@ -285,9 +303,13 @@ The overlay can show:
 - The offset in milliseconds when replay time maps to the nearest sampled pose frame
   rather than an exact pose frame.
 
-The overlay updates when replay time changes, frame-step buttons are used, analysis
-completes, analysis is cleared, or the window is resized. The overlay does not block
-video controls.
+The overlay uses each returned frame's `timestamp_seconds` rather than calculating
+`currentTime * fps`. During playback, browsers that support
+`HTMLVideoElement.requestVideoFrameCallback` redraw from the presented frame
+`mediaTime`; other browsers use a bounded animation-frame fallback plus normal media
+events. The overlay also redraws when seeking completes, frame-step buttons are used,
+analysis completes, analysis is cleared, the overlay source changes, or the window is
+resized. The overlay does not block video controls.
 
 The replay toolbar order is `Poses`, `Evaluation Lines`, `Metric`, then `Speed`.
 
@@ -322,6 +344,9 @@ and sized for short frame-number lists. Short evidence values remain compact.
 
 - MediaPipe body-pose analysis requires a configured local `.task` model file.
 - Pose is estimated from sampled frames, not necessarily every original video frame.
+- OpenCV presentation timestamps are backend/container dependent. When they are missing
+  or unreliable, the app uses constant-FPS synthesis or repairs timestamps and reports
+  that fallback in diagnostics.
 - Overlay drawing accounts for `object-fit: contain` and letterboxing, but browser replay
   time is still matched to exact, nearest sampled, or interpolated pose frames.
 - Evaluation lines are visual aids over returned analysis evidence. MediaPipe still
