@@ -199,6 +199,8 @@ class SwingPhaseScoreResponse(BaseModel):
     score: float
     weight: float
     confidence: float
+    metric_deduction: float
+    fault_deduction: float
 
 
 class SwingMetricResultResponse(BaseModel):
@@ -224,6 +226,8 @@ class SwingFaultResultResponse(BaseModel):
     phase: str
     severity: str
     confidence: float
+    deduction: float
+    linked_metrics: tuple[str, ...]
     evidence: str
     evidence_frames: tuple[int, ...]
 
@@ -255,6 +259,8 @@ class SwingAnalysisResultResponse(BaseModel):
                     score=score.score,
                     weight=score.weight,
                     confidence=score.confidence,
+                    metric_deduction=score.metric_deduction,
+                    fault_deduction=score.fault_deduction,
                 )
                 for score in result.phase_scores
             ),
@@ -280,6 +286,8 @@ class SwingAnalysisResultResponse(BaseModel):
                     phase=fault.phase.value,
                     severity=fault.severity.value,
                     confidence=fault.confidence,
+                    deduction=fault.deduction,
+                    linked_metrics=tuple(metric.value for metric in fault.linked_metrics),
                     evidence=fault.evidence,
                     evidence_frames=fault.evidence_frames,
                 )
@@ -424,9 +432,18 @@ class SwingVideoSamplingDiagnosticsResponse(BaseModel):
     effective_fps: float | None
     sampled_frame_count: int
     total_frame_count: int | None
+    source_duration_seconds: float | None
+    analyzed_start_seconds: float | None
+    analyzed_end_seconds: float | None
+    analyzed_duration_seconds: float | None
     max_frame_count: int
     cap_applied: bool
     full_frame_sampling: bool
+    temporal_coverage_complete: bool
+    timestamp_source: str
+    timestamp_fallback_reason: str | None = None
+    timestamp_repair_count: int
+    limitations: tuple[str, ...]
 
     @classmethod
     def from_diagnostics(
@@ -441,9 +458,18 @@ class SwingVideoSamplingDiagnosticsResponse(BaseModel):
             effective_fps=diagnostics.effective_fps,
             sampled_frame_count=diagnostics.sampled_frame_count,
             total_frame_count=diagnostics.total_frame_count,
+            source_duration_seconds=diagnostics.source_duration_seconds,
+            analyzed_start_seconds=diagnostics.analyzed_start_seconds,
+            analyzed_end_seconds=diagnostics.analyzed_end_seconds,
+            analyzed_duration_seconds=diagnostics.analyzed_duration_seconds,
             max_frame_count=diagnostics.max_frame_count,
             cap_applied=diagnostics.cap_applied,
             full_frame_sampling=diagnostics.full_frame_sampling,
+            temporal_coverage_complete=diagnostics.temporal_coverage_complete,
+            timestamp_source=diagnostics.timestamp_source,
+            timestamp_fallback_reason=diagnostics.timestamp_fallback_reason,
+            timestamp_repair_count=diagnostics.timestamp_repair_count,
+            limitations=diagnostics.limitations,
         )
 
 

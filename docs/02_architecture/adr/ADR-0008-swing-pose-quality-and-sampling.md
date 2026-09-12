@@ -4,6 +4,12 @@
 
 Accepted
 
+Superseded in part by
+[[ADR-0013-fps-independent-timestamp-sampling-and-analysis]] for timestamp policy,
+stored-video swing sampling cadence, frame-cap coverage, and time-aware pose
+post-processing. ADR-0008 remains accepted for pose-quality diagnostics, raw/stabilized
+debug outputs, candidate selection, and aspect-aware browser overlay placement.
+
 ## Context
 
 DEV003-05 made MediaPipe Pose Landmarker the default body-pose backend for stored-video
@@ -21,7 +27,10 @@ Add a configurable pose-quality pipeline for video-driven swing analysis:
 
 - Use quality-mode sampling in `SwingVideoAnalysisApplicationService`.
 - Default to higher-accuracy swing sampling, with balanced and faster modes available.
-- Process every original frame for short clips under a configurable safe cap.
+- Process every original frame for short clips under a configurable safe cap. This
+  DEV003-06 sampling detail is superseded for stored-video swing analysis by ADR-0013:
+  default quality modes now keep stable target cadences and apply frame caps across the
+  full usable clip duration.
 - Keep explicit sampling overrides supported for tests and future expert workflows.
 - Configure MediaPipe pose tuning through `AppSettings` and `BMA_MEDIAPIPE_*`
   environment variables.

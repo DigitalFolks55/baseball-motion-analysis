@@ -20,6 +20,10 @@ def test_swing_analysis_api_returns_analysis_and_feedback(tmp_path: Path) -> Non
     assert payload["analysis"]["overall_score"] > 90.0
     assert payload["analysis"]["handedness"] == "right_handed"
     assert payload["analysis"]["phase_scores"]
+    assert {
+        "metric_deduction",
+        "fault_deduction",
+    }.issubset(payload["analysis"]["phase_scores"][0])
     assert payload["analysis"]["metrics"]
     assert any(
         metric["name"] == "normalized_stance_width" and metric["unit"] == "torso_lengths"
@@ -31,6 +35,32 @@ def test_swing_analysis_api_returns_analysis_and_feedback(tmp_path: Path) -> Non
     assert payload["feedback"]["improvement_points"]
     assert payload["feedback"]["drills_or_suggestions"]
     assert payload["feedback"]["limitations"]
+    assert str(tmp_path) not in response.text
+
+
+def test_swing_analysis_api_serializes_fault_score_impact(tmp_path: Path) -> None:
+    client = TestClient(_create_test_app(tmp_path))
+    payload = _good_swing_payload()
+    payload["frames"] = [
+        _pose_frame_to_payload(frame) for frame in good_swing_frames(scenario="door_swing")
+    ]
+
+    response = client.post("/api/v1/analysis/swing", json=payload)
+
+    assert response.status_code == 200
+    analysis = response.json()["analysis"]
+    fault = next(
+        fault
+        for fault in analysis["detected_faults"]
+        if fault["fault_type"] == "door_swing_casting"
+    )
+    foot_strike_score = next(
+        score for score in analysis["phase_scores"] if score["phase"] == "foot_strike"
+    )
+    assert "deduction" in fault
+    assert "linked_metrics" in fault
+    assert fault["linked_metrics"]
+    assert "fault_deduction" in foot_strike_score
     assert str(tmp_path) not in response.text
 
 

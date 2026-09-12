@@ -430,6 +430,10 @@ Calculation:
 
 * Compare timing of pelvis rotation onset or peak angular velocity against shoulder
   rotation onset or peak angular velocity.
+* Report the separation in milliseconds. Positive values mean pelvis rotation leads
+  shoulder rotation; negative values mean shoulders lead hips.
+* The current threshold conversion preserves the earlier 30 FPS calibration reference:
+  one frame of lag at 30 FPS is `33.333` milliseconds.
 
 Interpretation:
 
@@ -581,8 +585,8 @@ Suggested drills:
 ## Scoring Model
 
 Use a 100-point score with phase-weighted deductions. Score calculations should produce
-phase sub-scores and metric-level deductions so feedback can explain why points were
-lost.
+phase sub-scores, metric-level deductions, and fault-level score impact so feedback can
+explain why points were lost.
 
 Recommended phase weights:
 
@@ -596,6 +600,16 @@ Penalty behavior:
 
 * Each metric should define a target range, a warning range, and a severe range.
 * Penalties should scale with deviation magnitude from the target.
+* Detected faults should be score-relevant through the analysis layer. Metric-backed
+  faults should credit existing linked metric deductions first, then apply only a capped
+  additional fault deduction when the fault severity and confidence justify it.
+* Secondary fault evidence that is not represented as a scored metric, such as excessive
+  wrist-to-chest distance or lead-knee forward drift, should be able to reduce the
+  relevant phase score when the evidence is sufficiently supported.
+* Fault caps should scale with phase weight, severity, and confidence so low-confidence
+  evidence has smaller score impact than high-confidence evidence.
+* Suppressed impact-phase faults should not add hidden score penalties when impact is
+  skipped or unavailable.
 * Missing or low-confidence metrics should reduce confidence rather than automatically
   deducting full points.
 * The scoring layer should identify the largest deduction as the primary improvement
@@ -732,11 +746,32 @@ callers may also provide frame dimensions; if they do not, the evaluator keeps t
 legacy normalized-coordinate fallback and should be treated as lower-fidelity geometry
 for non-square sources.
 
+DEV007-01 makes stored-video swing timing independent of source FPS. The motion layer
+uses `timestamp_seconds` as presentation time rather than treating adjacent sampled
+frames as equal elapsed-time steps. Linear movement thresholds are interpreted as body
+scales per second, angular movement thresholds as degrees per second, and persistence
+windows are mapped from the 30 FPS reference into real-time durations. Stored-video
+quality modes use stable target cadences of 30 FPS, 24 FPS, and 12 FPS for higher
+accuracy, balanced, and faster modes respectively, with frame caps distributed across
+the full usable clip. This keeps setup and follow-through regions eligible even when the
+source video has a high frame rate.
+
+DEV007-02 makes Detected Faults explicitly score-relevant. Swing fault results now
+include linked metric names and bounded score impact. Phase scores now separate metric
+deductions from additional fault deductions. The analysis layer credits linked metric
+deductions before adding any fault deduction, preventing uncontrolled double counting
+while allowing secondary evidence such as wrist-to-chest distance or lead-knee forward
+drift to affect score. UI and API layers only serialize and render these returned
+fields.
+
 Known limitations:
 
 * MediaPipe body-pose analysis requires a configured local `.task` model file.
-* Pose is estimated from sampled frames unless the selected quality mode and clip length
-  allow full-frame processing under the configured cap.
+* Pose is estimated from timestamp-selected sampled frames. Higher-FPS short clips no
+  longer bypass the quality-mode target cadence solely because they fit under the frame
+  cap.
+* OpenCV decoder timestamps are backend dependent; constant-FPS synthesis or timestamp
+  repair is reported as a diagnostic limitation when needed.
 * Faster analysis mode can miss foot strike or the estimated impact window.
 * Notebook-parity mode is a diagnostic view of raw MediaPipe landmarks, not the final
   stabilized analysis path.

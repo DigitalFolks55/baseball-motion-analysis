@@ -209,6 +209,32 @@ The swing video endpoint returns sampling diagnostics, pose-quality diagnostics,
 per-phase confidence/detection-method metadata. UI code renders those diagnostics but
 does not contain swing thresholds or coaching rules.
 
+DEV007-01 supersedes the stored-video timing parts of DEV003-06 with a timestamp-first
+policy:
+
+```text
+stored video
+  -> video-owned timestamp normalization and full-duration time sampling
+  -> pose-owned MediaPipe timestamp input and duration-based stabilization
+  -> motion-owned elapsed-time event detection and timing metrics
+  -> analysis-owned converted thresholds and scoring
+  -> API/UI serialization and rendering of explicit timestamps, units, and diagnostics
+```
+
+`frame_index` remains the decoded source-frame identifier. `timestamp_seconds` is the
+presentation time used for pose estimation, motion analysis, and replay overlays. The
+video layer uses valid monotonic OpenCV timestamps when available, otherwise synthesizes
+or repairs timestamps with explicit diagnostics. Stored-video quality modes use stable
+target cadences: 30 FPS for higher accuracy, 24 FPS for balanced, and 12 FPS for faster.
+Frame-count caps are applied across the full usable clip duration so setup and
+follow-through regions both remain eligible.
+
+Pose stabilization windows and interpolation gaps are duration-based. Motion helpers use
+body scales per second or degrees per second for movement rates, and
+`hip_shoulder_separation_timing` is serialized in milliseconds. API routes and browser
+UI render these returned units and diagnostics without calculating timing policy,
+thresholds, or baseball rules.
+
 For DEV003-07, the normal app path defaults to one MediaPipe pose for single-player
 clips. The app service can derive a notebook-parity pose mode for diagnostics; that mode
 requests one pose and disables temporal post-processing so raw MediaPipe landmarks can be
@@ -252,6 +278,25 @@ early connection, lead knee blocking, hip-shoulder separation timing, estimated 
 angle, and follow-through posture/balance. UI and API adapters display returned metric
 names, units, scores, and faults, but v2 thresholds, scoring, and drill mapping stay in
 `motion`, `analysis`, and `feedback`.
+
+DEV007-02 keeps the same service/API boundaries and makes Detected Faults explicitly
+score-relevant:
+
+```text
+v2 metric deductions
+  -> detected faults with linked metrics and secondary evidence
+  -> capped fault-aware phase scoring
+  -> API/UI rendering of returned metric and fault score impact
+```
+
+The `analysis` module credits linked metric deductions before applying any additional
+fault deduction. Fault deductions are capped by phase, severity, and confidence, so a
+metric-backed fault is not double-counted as a full independent penalty. Secondary
+evidence that is not itself a scored metric, such as wrist-to-chest distance or lead-knee
+forward drift, can still lower the relevant phase score when it triggers a supported
+fault. API and UI adapters serialize and display returned `metric_deduction`,
+`fault_deduction`, fault `deduction`, and `linked_metrics` fields without calculating
+baseball scoring rules.
 
 DEV004-02 extends the stored-video swing response with optional evaluation-line overlay
 primitives:
@@ -442,4 +487,4 @@ normal impact status to skipped.
 
 ## Current Foundation
 
-The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects. DEV002-01 adds video-only browser upload, SQLite media library indexing, and HTML5 replay. DEV003-01 adds swing analysis for already-extracted pose/keypoint sequences, including scoring and feedback generation. DEV003-02 exposes that swing analysis through the local browser UI and `/api/v1/analysis/swing` for already-extracted pose JSON and deterministic demo data. DEV003-03 revises the browser workspace into media, motion-analysis, and replay columns and adds a pose-keypoint overlay drawn from the current pose input. DEV003-04 adds video-driven swing analysis through `/api/v1/analysis/swing/video`, sampled-frame pose estimation through a pose-layer interface, automatic event selection, in-memory pose caching, and overlay data for the replay UI. DEV003-05 adopts MediaPipe Pose Landmarker as the first real local player-body pose backend for stored-video swing analysis. DEV003-06 adds quality-mode sampling, pose stabilization, diagnostics, motion-aware event selection, and improved overlay alignment. DEV003-07 adds notebook-parity pose diagnostics, raw-vs-stabilized overlay output, one-pose default configuration, selected-candidate diagnostics, and replay offset copy. DEV003-08 renames that visible debug mode to `Single pose`, revises the browser layout, folds secondary diagnostics, and clarifies event versus score confidence labels. DEV004-01 replaces normal swing scoring with the v2 youth baseline methodology and returns methodology metadata and metric units. DEV004-02 adds optional replay evaluation lines returned by the swing video service and toggled in the replay toolbar. DEV004-03 adds independent pose/evaluation-line overlay toggles, disables pose text tags by default, makes the video library scrollable, and verifies all required evaluation-line categories. DEV004-04 passes source dimensions into swing v2 measurement math for non-square video correctness while preserving normalized overlay primitives. DEV004-05 UI update 2 adds a browser-only metric dropdown that filters returned evaluation lines by `metric_name`; DEV004-06 expands it to multi-select and bounds evidence-heavy cells; DEV004-07 makes the metric chooser compact and narrows evidence-table content; DEV005-01 adds an English/Japanese language selector and browser-side localization for UI/result text. DEV006-01 adds swing frame-quality diagnostics, active swing window detection, constrained estimated impact selection, candidate switch/ambiguity counts, and scoring-evidence diagnostics. DEV006-02 reverts default candidate-switch holdback to original best-score behavior, keeps confirmed high-speed stabilization safeguards, revises event detection around baseball-motion semantics, and serializes event fallback reasons. DEV006-03 adds configurable impact availability policy, event statuses, skipped impact-dependent scoring, and tighter setup/stride/foot-strike/follow-through semantics. DEV006-04 adds lead-leg lift stride selection, foot-strike dependency on prior lift or no-stride fallback, visible browser impact On/Off control, and active-window-bounded follow-through finish selection. DEV006-05 suppresses explicitly skipped impact from normal event display/overlay, restores no-ball fallback evaluation for selected non-contact metrics, and calibrates no-leg-lift stride fallback confidence. DEV006-06 removes the normal browser impact-off control, restores body-pose estimated impact as the browser path, and refines estimated impact after foot strike using contact-zone and bracing cues. It does not perform image-sequence browser upload, camera streaming, report persistence, bat/ball detection, production model packaging, release/deployment, automatic throwing/pitching/fielding analysis, or language-specific scoring.
+The current scaffold exposes `GET /api/v1/health` through an application service. Local media input foundation behavior is available through Python service objects. DEV002-01 adds video-only browser upload, SQLite media library indexing, and HTML5 replay. DEV003-01 adds swing analysis for already-extracted pose/keypoint sequences, including scoring and feedback generation. DEV003-02 exposes that swing analysis through the local browser UI and `/api/v1/analysis/swing` for already-extracted pose JSON and deterministic demo data. DEV003-03 revises the browser workspace into media, motion-analysis, and replay columns and adds a pose-keypoint overlay drawn from the current pose input. DEV003-04 adds video-driven swing analysis through `/api/v1/analysis/swing/video`, sampled-frame pose estimation through a pose-layer interface, automatic event selection, in-memory pose caching, and overlay data for the replay UI. DEV003-05 adopts MediaPipe Pose Landmarker as the first real local player-body pose backend for stored-video swing analysis. DEV003-06 adds quality-mode sampling, pose stabilization, diagnostics, motion-aware event selection, and improved overlay alignment. DEV003-07 adds notebook-parity pose diagnostics, raw-vs-stabilized overlay output, one-pose default configuration, selected-candidate diagnostics, and replay offset copy. DEV003-08 renames that visible debug mode to `Single pose`, revises the browser layout, folds secondary diagnostics, and clarifies event versus score confidence labels. DEV004-01 replaces normal swing scoring with the v2 youth baseline methodology and returns methodology metadata and metric units. DEV004-02 adds optional replay evaluation lines returned by the swing video service and toggled in the replay toolbar. DEV004-03 adds independent pose/evaluation-line overlay toggles, disables pose text tags by default, makes the video library scrollable, and verifies all required evaluation-line categories. DEV004-04 passes source dimensions into swing v2 measurement math for non-square video correctness while preserving normalized overlay primitives. DEV004-05 UI update 2 adds a browser-only metric dropdown that filters returned evaluation lines by `metric_name`; DEV004-06 expands it to multi-select and bounds evidence-heavy cells; DEV004-07 makes the metric chooser compact and narrows evidence-table content; DEV005-01 adds an English/Japanese language selector and browser-side localization for UI/result text. DEV006-01 adds swing frame-quality diagnostics, active swing window detection, constrained estimated impact selection, candidate switch/ambiguity counts, and scoring-evidence diagnostics. DEV006-02 reverts default candidate-switch holdback to original best-score behavior, keeps confirmed high-speed stabilization safeguards, revises event detection around baseball-motion semantics, and serializes event fallback reasons. DEV006-03 adds configurable impact availability policy, event statuses, skipped impact-dependent scoring, and tighter setup/stride/foot-strike/follow-through semantics. DEV006-04 adds lead-leg lift stride selection, foot-strike dependency on prior lift or no-stride fallback, visible browser impact On/Off control, and active-window-bounded follow-through finish selection. DEV006-05 suppresses explicitly skipped impact from normal event display/overlay, restores no-ball fallback evaluation for selected non-contact metrics, and calibrates no-leg-lift stride fallback confidence. DEV006-06 removes the normal browser impact-off control, restores body-pose estimated impact as the browser path, and refines estimated impact after foot strike using contact-zone and bracing cues. DEV007-01 adds timestamp normalization, full-duration time sampling, duration-based pose post-processing, elapsed-time swing motion helpers, millisecond hip/shoulder timing, timestamp diagnostics, and presented-frame replay overlay synchronization. DEV007-02 adds fault-aware swing scoring with linked metric credits and capped fault deductions. It does not perform image-sequence browser upload, camera streaming, report persistence, bat/ball detection, production model packaging, release/deployment, automatic throwing/pitching/fielding analysis, or language-specific scoring.

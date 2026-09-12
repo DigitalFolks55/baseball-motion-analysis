@@ -72,7 +72,7 @@ class SwingAnalysisConfig:
     early_connection_severe_margin_degrees: float = 30.0
     lead_knee_warning_flexion_degrees: float = -8.0
     lead_knee_severe_flexion_degrees: float = -20.0
-    hip_shoulder_min_lag_frames: float = 1.0
+    hip_shoulder_min_lag_milliseconds: float = 1000.0 / 30.0
     attack_angle_min_degrees: float = 5.0
     attack_angle_max_degrees: float = 15.0
     excessive_attack_angle_degrees: float = 20.0
@@ -80,6 +80,8 @@ class SwingAnalysisConfig:
     attack_angle_severe_low_degrees: float = -10.0
     wrist_chest_distance_ratio: float = 0.95
     lead_knee_forward_drift_ratio: float = 0.12
+    fault_warning_phase_penalty_ratio: float = 0.20
+    fault_severe_phase_penalty_ratio: float = 0.35
     follow_through_warning_score: float = 10.0
     follow_through_severe_score: float = 22.0
 
@@ -109,6 +111,8 @@ class SwingFaultResult:
     phase: SwingPhase
     severity: SwingSeverity
     confidence: float
+    deduction: float
+    linked_metrics: tuple[SwingMetricName, ...]
     evidence: str
     evidence_frames: tuple[int, ...]
 
@@ -121,6 +125,8 @@ class SwingPhaseScore:
     score: float
     weight: float
     confidence: float
+    metric_deduction: float
+    fault_deduction: float
 
 
 @dataclass(frozen=True)
@@ -141,10 +147,10 @@ class SwingAnalysisResult:
 
 
 _PHASE_WEIGHTS: Mapping[SwingPhase, float] = {
-    SwingPhase.SETUP: 0.10,
-    SwingPhase.STRIDE: 0.20,
+    SwingPhase.SETUP: 0.15,
+    SwingPhase.STRIDE: 0.25,
     SwingPhase.FOOT_STRIKE: 0.25,
-    SwingPhase.IMPACT: 0.35,
+    SwingPhase.IMPACT: 0.25,
     SwingPhase.FOLLOW_THROUGH: 0.10,
 }
 
@@ -171,7 +177,7 @@ _METRIC_UNITS: Mapping[SwingMetricName, str] = {
     SwingMetricName.HEAD_TRANSLATION_RATIO: "torso_lengths",
     SwingMetricName.EARLY_CONNECTION_ANGLE: "degrees",
     SwingMetricName.LEAD_KNEE_BLOCKING_INDEX: "degrees",
-    SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: "frames",
+    SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING: "milliseconds",
     SwingMetricName.ESTIMATED_ATTACK_ANGLE: "degrees",
     SwingMetricName.FOLLOW_THROUGH_POSTURE_BALANCE: "posture_score",
 }
@@ -226,7 +232,7 @@ def analyze_swing(
         evaluation_config,
         measurement_space,
     )
-    phase_scores = _score_phases(metrics)
+    phase_scores = _score_phases(metrics, faults)
     limitations = _collect_limitations(phases, raw_metrics, handedness)
     confidence = _aggregate_confidence(metrics, phases.confidence)
     confidence *= resolve_body_sides(handedness).confidence
@@ -508,7 +514,7 @@ def _evaluate_hip_shoulder_timing(
     config: SwingAnalysisConfig,
 ) -> SwingMetricResult:
     value = _require_value(metric)
-    if value >= config.hip_shoulder_min_lag_frames:
+    if value >= config.hip_shoulder_min_lag_milliseconds:
         penalty = 0.0
         severity = SwingSeverity.GOOD
     elif value >= 0.0:
@@ -519,7 +525,7 @@ def _evaluate_hip_shoulder_timing(
         severity = SwingSeverity.SEVERE
     return _result(
         metric,
-        target_min=config.hip_shoulder_min_lag_frames,
+        target_min=config.hip_shoulder_min_lag_milliseconds,
         target_max=None,
         severity=severity,
         penalty=penalty,
@@ -587,15 +593,26 @@ def _detect_faults(
         )
     ):
         faults.append(
-            SwingFaultResult(
+            _fault_result(
+                metric_by_name,
+                config,
                 fault_type=SwingFaultType.DOOR_SWING_CASTING,
                 phase=SwingPhase.FOOT_STRIKE,
                 severity=_max_severity(torso_tilt, grip_loading, early_connection),
-                confidence=max(
-                    torso_tilt.confidence,
-                    grip_loading.confidence,
-                    early_connection.confidence,
-                    _ratio_confidence(wrist_chest_ratio),
+                confidence=_triggered_fault_confidence(
+                    torso_tilt,
+                    grip_loading,
+                    early_connection,
+                    secondary_confidences=(
+                        (_ratio_confidence(wrist_chest_ratio),)
+                        if _ratio_exceeds(wrist_chest_ratio, config.wrist_chest_distance_ratio)
+                        else ()
+                    ),
+                ),
+                linked_metrics=(
+                    SwingMetricName.TORSO_FORWARD_TILT,
+                    SwingMetricName.GRIP_LOADING_VECTOR,
+                    SwingMetricName.EARLY_CONNECTION_ANGLE,
                 ),
                 evidence=(
                     "Setup posture, grip loading, lead arm connection, or wrist distance "
@@ -605,6 +622,7 @@ def _detect_faults(
                     torso_tilt,
                     grip_loading,
                     early_connection,
+                    extra_frames=(phases.foot_strike,) if wrist_chest_ratio is not None else (),
                 ),
             )
         )
@@ -613,11 +631,17 @@ def _detect_faults(
     rear_knee_sway = metric_by_name[SwingMetricName.REAR_KNEE_SWAY]
     if _is_problem(head_translation) or _is_problem(rear_knee_sway):
         faults.append(
-            SwingFaultResult(
+            _fault_result(
+                metric_by_name,
+                config,
                 fault_type=SwingFaultType.FORWARD_AXIS_DRIFT_RUSHING,
                 phase=SwingPhase.STRIDE,
                 severity=_max_severity(head_translation, rear_knee_sway),
-                confidence=max(head_translation.confidence, rear_knee_sway.confidence),
+                confidence=_triggered_fault_confidence(head_translation, rear_knee_sway),
+                linked_metrics=(
+                    SwingMetricName.HEAD_TRANSLATION_RATIO,
+                    SwingMetricName.REAR_KNEE_SWAY,
+                ),
                 evidence="Head movement or rear-knee sway suggests early forward drift.",
                 evidence_frames=_combined_evidence_frames(head_translation, rear_knee_sway),
             )
@@ -626,11 +650,14 @@ def _detect_faults(
     separation = metric_by_name[SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING]
     if _is_problem(separation):
         faults.append(
-            SwingFaultResult(
+            _fault_result(
+                metric_by_name,
+                config,
                 fault_type=SwingFaultType.ARMS_ONLY_ONE_PIECE,
                 phase=SwingPhase.FOOT_STRIKE,
                 severity=_fault_severity(separation),
                 confidence=separation.confidence,
+                linked_metrics=(SwingMetricName.HIP_SHOULDER_SEPARATION_TIMING,),
                 evidence="Pelvis and shoulders did not show a clear timing lag.",
                 evidence_frames=separation.evidence_frames,
             )
@@ -644,11 +671,17 @@ def _detect_faults(
         attack_value > config.excessive_attack_angle_degrees or _is_problem(torso_tilt_change)
     ):
         faults.append(
-            SwingFaultResult(
+            _fault_result(
+                metric_by_name,
+                config,
                 fault_type=SwingFaultType.EXCESSIVE_UPPER_SWING_EARLY_EXTENSION,
                 phase=SwingPhase.IMPACT,
                 severity=_max_severity(attack, torso_tilt_change),
-                confidence=max(attack.confidence, torso_tilt_change.confidence),
+                confidence=_triggered_fault_confidence(attack, torso_tilt_change),
+                linked_metrics=(
+                    SwingMetricName.ESTIMATED_ATTACK_ANGLE,
+                    SwingMetricName.TORSO_TILT_PRESERVATION,
+                ),
                 evidence="Attack angle or trunk posture suggests an excessive upward path.",
                 evidence_frames=_combined_evidence_frames(attack, torso_tilt_change),
             )
@@ -675,23 +708,40 @@ def _detect_faults(
         )
     ):
         faults.append(
-            SwingFaultResult(
+            _fault_result(
+                metric_by_name,
+                config,
                 fault_type=SwingFaultType.COLLAPSED_LEAD_SIDE,
                 phase=SwingPhase.IMPACT,
                 severity=_fault_severity(lead_knee),
-                confidence=max(lead_knee.confidence, _ratio_confidence(lead_knee_drift)),
+                confidence=_triggered_fault_confidence(
+                    lead_knee,
+                    secondary_confidences=(
+                        (_ratio_confidence(lead_knee_drift),)
+                        if _ratio_exceeds(lead_knee_drift, config.lead_knee_forward_drift_ratio)
+                        else ()
+                    ),
+                ),
+                linked_metrics=(SwingMetricName.LEAD_KNEE_BLOCKING_INDEX,),
                 evidence="Lead knee behavior suggests the front side may not be bracing.",
-                evidence_frames=lead_knee.evidence_frames,
+                evidence_frames=_combined_evidence_frames(
+                    lead_knee,
+                    extra_frames=(phases.impact,) if lead_knee_drift is not None else (),
+                ),
             )
         )
 
     return tuple(faults)
 
 
-def _score_phases(metrics: Sequence[SwingMetricResult]) -> tuple[SwingPhaseScore, ...]:
+def _score_phases(
+    metrics: Sequence[SwingMetricResult],
+    faults: Sequence[SwingFaultResult],
+) -> tuple[SwingPhaseScore, ...]:
     scores: list[SwingPhaseScore] = []
     for phase, weight in _PHASE_WEIGHTS.items():
         phase_metrics = [metric for metric in metrics if _METRIC_PHASES[metric.name] == phase]
+        phase_faults = [fault for fault in faults if fault.phase == phase]
         if not phase_metrics:
             scores.append(
                 SwingPhaseScore(
@@ -699,16 +749,21 @@ def _score_phases(metrics: Sequence[SwingMetricResult]) -> tuple[SwingPhaseScore
                     score=100.0,
                     weight=weight,
                     confidence=0.0,
+                    metric_deduction=0.0,
+                    fault_deduction=0.0,
                 )
             )
             continue
         evaluated = [
             metric for metric in phase_metrics if metric.severity != SwingSeverity.NOT_EVALUATED
         ]
-        deduction = (
+        metric_deduction = (
             sum(metric.deduction for metric in phase_metrics) / weight if weight > 0.0 else 0.0
         )
-        score = max(0.0, 100.0 - deduction)
+        fault_deduction = (
+            sum(fault.deduction for fault in phase_faults) / weight if weight > 0.0 else 0.0
+        )
+        score = max(0.0, 100.0 - metric_deduction - fault_deduction)
         confidence = sum(metric.confidence for metric in phase_metrics) / len(phase_metrics)
         if not evaluated:
             confidence = 0.0
@@ -718,6 +773,8 @@ def _score_phases(metrics: Sequence[SwingMetricResult]) -> tuple[SwingPhaseScore
                 score=round(score, 2),
                 weight=weight,
                 confidence=round(confidence, 3),
+                metric_deduction=round(metric_deduction, 2),
+                fault_deduction=round(fault_deduction, 2),
             )
         )
     return tuple(scores)
@@ -780,7 +837,13 @@ def _improvement_priorities(
     faults: Sequence[SwingFaultResult],
 ) -> tuple[str, ...]:
     if faults:
-        return tuple(_fault_label(fault.fault_type) for fault in faults)
+        metric_by_name = {metric.name: metric for metric in metrics}
+        sorted_faults = sorted(
+            faults,
+            key=lambda fault: _fault_score_impact(fault, metric_by_name),
+            reverse=True,
+        )
+        return tuple(_fault_label(fault.fault_type) for fault in sorted_faults)
     sorted_metrics = sorted(metrics, key=lambda metric: metric.deduction, reverse=True)
     return tuple(
         metric.name.value
@@ -800,6 +863,82 @@ def _fault_label(fault_type: SwingFaultType) -> str:
         SwingFaultType.COLLAPSED_LEAD_SIDE: "Collapsed Lead Side",
     }
     return labels[fault_type]
+
+
+def _fault_result(
+    metric_by_name: Mapping[SwingMetricName, SwingMetricResult],
+    config: SwingAnalysisConfig,
+    *,
+    fault_type: SwingFaultType,
+    phase: SwingPhase,
+    severity: SwingSeverity,
+    confidence: float,
+    linked_metrics: tuple[SwingMetricName, ...],
+    evidence: str,
+    evidence_frames: tuple[int, ...],
+) -> SwingFaultResult:
+    deduction = _fault_deduction(
+        phase,
+        severity,
+        confidence,
+        linked_metrics,
+        metric_by_name,
+        config,
+    )
+    return SwingFaultResult(
+        fault_type=fault_type,
+        phase=phase,
+        severity=severity,
+        confidence=round(confidence, 3),
+        deduction=deduction,
+        linked_metrics=linked_metrics,
+        evidence=evidence,
+        evidence_frames=evidence_frames,
+    )
+
+
+def _fault_deduction(
+    phase: SwingPhase,
+    severity: SwingSeverity,
+    confidence: float,
+    linked_metrics: Sequence[SwingMetricName],
+    metric_by_name: Mapping[SwingMetricName, SwingMetricResult],
+    config: SwingAnalysisConfig,
+) -> float:
+    if severity not in {SwingSeverity.WARNING, SwingSeverity.SEVERE}:
+        return 0.0
+    severity_ratio = (
+        config.fault_severe_phase_penalty_ratio
+        if severity == SwingSeverity.SEVERE
+        else config.fault_warning_phase_penalty_ratio
+    )
+    phase_budget = _PHASE_WEIGHTS[phase] * 100.0
+    capped_fault_budget = phase_budget * severity_ratio * max(0.0, min(1.0, confidence))
+    linked_metric_deduction = sum(
+        metric_by_name[name].deduction
+        for name in linked_metrics
+        if name in metric_by_name and _METRIC_PHASES[name] == phase
+    )
+    return round(max(0.0, capped_fault_budget - linked_metric_deduction), 2)
+
+
+def _fault_score_impact(
+    fault: SwingFaultResult,
+    metric_by_name: Mapping[SwingMetricName, SwingMetricResult],
+) -> float:
+    linked_metric_deduction = sum(
+        metric_by_name[name].deduction for name in fault.linked_metrics if name in metric_by_name
+    )
+    return fault.deduction + linked_metric_deduction
+
+
+def _triggered_fault_confidence(
+    *metrics: SwingMetricResult,
+    secondary_confidences: Sequence[float] = (),
+) -> float:
+    confidences = [metric.confidence for metric in metrics if _is_problem(metric)]
+    confidences.extend(secondary_confidences)
+    return max(confidences, default=0.0)
 
 
 def _range_penalty(
@@ -848,10 +987,14 @@ def _max_severity(*metrics: SwingMetricResult) -> SwingSeverity:
     return SwingSeverity.WARNING
 
 
-def _combined_evidence_frames(*metrics: SwingMetricResult) -> tuple[int, ...]:
+def _combined_evidence_frames(
+    *metrics: SwingMetricResult,
+    extra_frames: Sequence[int] = (),
+) -> tuple[int, ...]:
     frames: list[int] = []
     for metric in metrics:
         frames.extend(metric.evidence_frames)
+    frames.extend(extra_frames)
     return tuple(dict.fromkeys(frames))
 
 

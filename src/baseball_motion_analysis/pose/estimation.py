@@ -53,6 +53,10 @@ _MEDIAPIPE_LANDMARK_INDEXES = {
     PoseKeypointName.RIGHT_FOOT_INDEX: 32,
 }
 
+_REFERENCE_FPS = 30.0
+_MIN_VALID_DELTA_SECONDS = 0.001
+_SPARSE_DELTA_SECONDS = 0.250
+
 
 @dataclass(frozen=True)
 class MediaPipePoseEstimatorConfig:
@@ -63,8 +67,10 @@ class MediaPipePoseEstimatorConfig:
     min_pose_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
     min_landmark_confidence: float = 0.3
-    smoothing_window: int = 3
-    max_interpolation_gap_frames: int = 2
+    smoothing_window_seconds: float = 3 / _REFERENCE_FPS
+    max_interpolation_gap_seconds: float = 2 / _REFERENCE_FPS
+    smoothing_window: int | None = None
+    max_interpolation_gap_frames: int | None = None
     outlier_rejection_enabled: bool = True
     outlier_distance_ratio: float = 0.75
     high_velocity_smoothing_limit_ratio: float = 0.8
@@ -80,6 +86,24 @@ class MediaPipePoseEstimatorConfig:
     runtime_delegate: Literal["cpu", "gpu"] = "cpu"
 
     def __post_init__(self) -> None:
+        if self.smoothing_window is not None:
+            if self.smoothing_window < 1:
+                msg = "smoothing_window must be greater than or equal to 1"
+                raise ValueError(msg)
+            object.__setattr__(
+                self,
+                "smoothing_window_seconds",
+                self.smoothing_window / _REFERENCE_FPS,
+            )
+        if self.max_interpolation_gap_frames is not None:
+            if self.max_interpolation_gap_frames < 0:
+                msg = "max_interpolation_gap_frames must be greater than or equal to 0"
+                raise ValueError(msg)
+            object.__setattr__(
+                self,
+                "max_interpolation_gap_seconds",
+                self.max_interpolation_gap_frames / _REFERENCE_FPS,
+            )
         if self.num_poses < 1:
             msg = "num_poses must be greater than or equal to 1"
             raise ValueError(msg)
@@ -93,11 +117,11 @@ class MediaPipePoseEstimatorConfig:
             if not 0.0 <= value <= 1.0:
                 msg = f"{name} must be between 0 and 1"
                 raise ValueError(msg)
-        if self.smoothing_window < 1:
-            msg = "smoothing_window must be greater than or equal to 1"
+        if self.smoothing_window_seconds < 0.0:
+            msg = "smoothing_window_seconds must be greater than or equal to 0"
             raise ValueError(msg)
-        if self.max_interpolation_gap_frames < 0:
-            msg = "max_interpolation_gap_frames must be greater than or equal to 0"
+        if self.max_interpolation_gap_seconds < 0.0:
+            msg = "max_interpolation_gap_seconds must be greater than or equal to 0"
             raise ValueError(msg)
         if self.outlier_distance_ratio <= 0:
             msg = "outlier_distance_ratio must be greater than 0"
@@ -124,8 +148,10 @@ class MediaPipePoseEstimatorConfig:
         return replace(
             config,
             num_poses=1,
-            smoothing_window=1,
-            max_interpolation_gap_frames=0,
+            smoothing_window_seconds=0.0,
+            max_interpolation_gap_seconds=0.0,
+            smoothing_window=None,
+            max_interpolation_gap_frames=None,
             outlier_rejection_enabled=False,
             player_selection_strategy="confidence_size",
             processing_mode="notebook_parity",
@@ -1020,7 +1046,10 @@ def _reject_outlier_jumps(
             or _pose_frame_body_scale(next_frame)
             or 0.25
         )
-        threshold = max(0.01, scale * config.outlier_distance_ratio)
+        threshold = max(
+            0.01,
+            scale * _legacy_per_frame_ratio_to_rate(config.outlier_distance_ratio),
+        )
         keypoints: dict[PoseKeypointName, PoseKeypoint] = {}
         for name, keypoint in current_frame.keypoints.items():
             previous = previous_frame.keypoints.get(name)
@@ -1031,10 +1060,15 @@ def _reject_outlier_jumps(
             previous_distance = _keypoint_distance(previous, keypoint)
             next_distance = _keypoint_distance(next_keypoint, keypoint)
             surrounding_distance = _keypoint_distance(previous, next_keypoint)
+            previous_dt = _timestamp_delta_seconds(previous_frame, current_frame)
+            next_dt = _timestamp_delta_seconds(current_frame, next_frame)
+            if previous_dt is None or next_dt is None:
+                keypoints[name] = keypoint
+                continue
             if (
-                previous_distance > threshold
-                and next_distance > threshold
-                and surrounding_distance <= threshold
+                previous_distance / previous_dt > threshold
+                and next_distance / next_dt > threshold
+                and surrounding_distance <= scale * config.outlier_distance_ratio
             ):
                 rejected_count += 1
                 continue
@@ -1054,7 +1088,7 @@ def _interpolate_short_gaps(
     frames: Sequence[PoseFrame],
     config: MediaPipePoseEstimatorConfig,
 ) -> tuple[tuple[PoseFrame, ...], frozenset[int]]:
-    if config.max_interpolation_gap_frames == 0 or len(frames) < 3:
+    if config.max_interpolation_gap_seconds <= 0.0 or len(frames) < 3:
         return tuple(frames), frozenset()
 
     keypoints_by_frame = [dict(frame.keypoints) for frame in frames]
@@ -1069,19 +1103,20 @@ def _interpolate_short_gaps(
             while index < len(frames) and name not in keypoints_by_frame[index]:
                 index += 1
             gap_end = index - 1
-            gap_length = gap_end - gap_start + 1
             before_index = gap_start - 1
             after_index = index
+            gap_duration = _gap_duration_seconds(frames, before_index, after_index)
             if (
                 before_index < 0
                 or after_index >= len(frames)
-                or gap_length > config.max_interpolation_gap_frames
+                or gap_duration is None
+                or gap_duration > config.max_interpolation_gap_seconds
             ):
                 continue
             before = keypoints_by_frame[before_index][name]
             after = keypoints_by_frame[after_index][name]
             for position in range(gap_start, gap_end + 1):
-                ratio = (position - before_index) / (after_index - before_index)
+                ratio = _interpolation_ratio(frames, before_index, after_index, position)
                 interpolated = PoseKeypoint(
                     point=Point2D(
                         x=before.point.x + (after.point.x - before.point.x) * ratio,
@@ -1111,18 +1146,22 @@ def _smooth_pose_frames(
     frames: Sequence[PoseFrame],
     config: MediaPipePoseEstimatorConfig,
 ) -> tuple[tuple[PoseFrame, ...], frozenset[int]]:
-    if config.smoothing_window <= 1 or len(frames) < 3:
+    if config.smoothing_window_seconds <= 0.0 or len(frames) < 3:
         return tuple(frames), frozenset()
 
-    radius = config.smoothing_window // 2
     smoothed_frame_indexes: set[int] = set()
     output: list[PoseFrame] = []
     for index, frame in enumerate(frames):
         keypoints: dict[PoseKeypointName, PoseKeypoint] = {}
         for name, keypoint in frame.keypoints.items():
+            neighbors_in_window = _neighbors_within_time_window(
+                frames,
+                index,
+                config.smoothing_window_seconds,
+            )
             neighbors = [
                 neighbor.keypoints[name]
-                for neighbor in frames[max(0, index - radius) : index + radius + 1]
+                for neighbor in neighbors_in_window
                 if name in neighbor.keypoints
             ]
             if len(neighbors) < 2:
@@ -1196,11 +1235,87 @@ def _should_skip_smoothing_for_fast_keypoint(
         multiplier = min(multiplier, 0.45)
     elif name in moderate_keypoints:
         multiplier = min(multiplier, 0.65)
-    threshold = max(0.01, scale * multiplier)
+    threshold = max(0.01, scale * _legacy_per_frame_ratio_to_rate(multiplier))
+    previous_dt = _timestamp_delta_seconds(frames[index - 1], frames[index])
+    next_dt = _timestamp_delta_seconds(frames[index], frames[index + 1])
+    if previous_dt is None or next_dt is None:
+        return False
     return (
-        _keypoint_distance(previous, current) > threshold
-        or _keypoint_distance(current, next_keypoint) > threshold
+        _keypoint_distance(previous, current) / previous_dt > threshold
+        or _keypoint_distance(current, next_keypoint) / next_dt > threshold
     )
+
+
+def _timestamp_delta_seconds(previous: PoseFrame, current: PoseFrame) -> float | None:
+    if previous.timestamp_seconds is None or current.timestamp_seconds is None:
+        return None
+    delta = current.timestamp_seconds - previous.timestamp_seconds
+    if not math.isfinite(delta) or delta < _MIN_VALID_DELTA_SECONDS:
+        return None
+    if delta > _SPARSE_DELTA_SECONDS:
+        return None
+    return delta
+
+
+def _gap_duration_seconds(
+    frames: Sequence[PoseFrame],
+    before_index: int,
+    after_index: int,
+) -> float | None:
+    if before_index < 0 or after_index >= len(frames):
+        return None
+    before_timestamp = frames[before_index].timestamp_seconds
+    after_timestamp = frames[after_index].timestamp_seconds
+    if before_timestamp is None or after_timestamp is None:
+        return (after_index - before_index - 1) / _REFERENCE_FPS
+    surrounding_duration = after_timestamp - before_timestamp
+    if not math.isfinite(surrounding_duration) or surrounding_duration <= 0.0:
+        return None
+    missing_count = after_index - before_index - 1
+    if missing_count < 1:
+        return 0.0
+    return surrounding_duration * missing_count / (missing_count + 1)
+
+
+def _interpolation_ratio(
+    frames: Sequence[PoseFrame],
+    before_index: int,
+    after_index: int,
+    position: int,
+) -> float:
+    before_timestamp = frames[before_index].timestamp_seconds
+    after_timestamp = frames[after_index].timestamp_seconds
+    current_timestamp = frames[position].timestamp_seconds
+    if (
+        before_timestamp is None
+        or after_timestamp is None
+        or current_timestamp is None
+        or after_timestamp <= before_timestamp
+    ):
+        return (position - before_index) / (after_index - before_index)
+    return (current_timestamp - before_timestamp) / (after_timestamp - before_timestamp)
+
+
+def _neighbors_within_time_window(
+    frames: Sequence[PoseFrame],
+    index: int,
+    window_seconds: float,
+) -> tuple[PoseFrame, ...]:
+    center_timestamp = frames[index].timestamp_seconds
+    if center_timestamp is None:
+        radius = max(0, round(window_seconds * _REFERENCE_FPS / 2.0))
+        return tuple(frames[max(0, index - radius) : index + radius + 1])
+    half_window = window_seconds / 2.0
+    return tuple(
+        frame
+        for frame in frames
+        if frame.timestamp_seconds is not None
+        and abs(frame.timestamp_seconds - center_timestamp) <= half_window
+    )
+
+
+def _legacy_per_frame_ratio_to_rate(value: float) -> float:
+    return value * _REFERENCE_FPS
 
 
 def _postprocess_limitations(

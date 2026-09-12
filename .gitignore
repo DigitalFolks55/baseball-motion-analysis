@@ -252,3 +252,6 @@ models/
 
 # Obsidian vault
 .obsidian/
+
+# Review documents
+docs/80_references/Review
